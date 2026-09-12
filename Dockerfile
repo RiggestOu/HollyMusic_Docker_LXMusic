@@ -2,49 +2,18 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> bf185f39444327d258f2b47f98f45554ae793021
 COPY package*.json ./
 
 RUN npm install --production
 
 COPY src ./src
 
-<<<<<<< HEAD
-=======
-=======
-# 复制 package 文件
-COPY package*.json ./
-
-# 安装依赖
-RUN npm install --production
-
-# 复制应用代码
-COPY src ./src
-
-# 生产阶段
->>>>>>> 1b38fd4b04e7cbf531f3a798999c9e2423015967
->>>>>>> bf185f39444327d258f2b47f98f45554ae793021
 FROM node:22-alpine AS runner
 
 WORKDIR /app
 
-<<<<<<< HEAD
 RUN apk add --no-cache wget
 
-=======
-<<<<<<< HEAD
-RUN apk add --no-cache wget
-
-=======
-# 安装 Chromium 依赖
-RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont
-
-# 复制应用
->>>>>>> 1b38fd4b04e7cbf531f3a798999c9e2423015967
->>>>>>> bf185f39444327d258f2b47f98f45554ae793021
 COPY --from=builder /app ./
 
 RUN mkdir -p /data/config

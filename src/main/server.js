@@ -4,8 +4,10 @@ const path = require('path')
 const zlib = require('zlib')
 
 const app = express()
-const PORT = process.env.PORT || 3080
-const DATA_DIR = process.env.DATA_DIR || '/data/config'
+// 容器内监听端口（与 docker-compose 的端口映射右侧保持一致）
+const PORT = process.env.PORT || 3000
+// 数据目录：音源配置持久化为 ${DATA_DIR}/sources.json
+const DATA_DIR = process.env.DATA_DIR || '/app/config'
 const SOURCES_FILE = path.join(DATA_DIR, 'sources.json')
 
 // 确保数据目录存在

@@ -1,0 +1,52 @@
+# ============================================================
+# HollyMusic 部署配置
+# ============================================================
+# 镜像：GHCR 自动构建产物
+#   https://github.com/users/RiggestOu/packages/container/package/hollymusic_docker_lxmusic
+#
+# 与原始模板的唯一差异：image 指向本仓库自建镜像
+# （原 ghcr.milu.moe/redcath/hollymusic 为第三方镜像，已弃用）
+#
+# 使用：docker compose up -d
+# 访问：http://localhost:3099
+#
+# 提示：容器内服务监听 3000，因此端口映射右侧须为 3000。
+#      若 .env 文件不存在，compose 会启动失败 —— 请先 `touch .env`
+#      或把下面 env_file 两行注释掉。
+# ============================================================
+
+services:
+  app:
+    image: ghcr.io/riggestou/hollymusic_docker_lxmusic:latest
+    container_name: holly-music
+
+    ports:
+      - "3099:3000"
+
+    env_file:
+      - .env
+
+    environment:
+      - NODE_ENV=production
+      # 当前镜像使用 JSON 文件存储（${DATA_DIR}/sources.json），
+      # 以下变量暂未生效，保留以对齐原模板
+      - DATABASE_URL=file:./prisma/data/music.db
+      - ENABLE_FILE_CACHE=true
+      - AUDIO_CACHE_DIR=/app/.cache/audio-cache
+      - AUDIO_CACHE_QUOTA_GB=10
+
+    volumes:
+      - ./custom-sources:/app/custom-sources
+      - ./config:/app/config
+      - ./prisma_data:/app/prisma/prisma/data
+      - ./cache_data:/app/.cache
+      - ./app_logs:/app/logs
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

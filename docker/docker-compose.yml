@@ -1,29 +1,37 @@
-version: '3.8'
+# ============================================================
+# HollyMusic Docker Compose —— 本地源码构建版
+# ============================================================
+# 用途：修改源码后在本机重新构建镜像并运行（开发/调试）
+# 若要使用 CI 已发布的镜像部署，请用仓库根目录的 docker-compose.yml
+#
+# 启动：cd .. && docker compose -f docker/docker-compose.yml up -d --build
+# 访问：http://localhost:3000
+# ============================================================
 
 services:
   holly-mudic:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
-    image: holly-mudic:latest
-    container_name: holly-mudic
+    image: holly-mudic:local
+    container_name: holly-mudic-local
+
     ports:
-      - "3080:3080"
-    volumes:
-      - ./data/config:/data/config
+      - "3000:3000"
+
     environment:
       - NODE_ENV=production
-      - PORT=3080
+      - PORT=3000
+      - DATA_DIR=/app/config
+
+    volumes:
+      - ../data/config:/app/config
+
     restart: unless-stopped
+
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3080/api/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
-    networks:
-      - holly-mudic-net
-
-networks:
-  holly-mudic-net:
-    driver: bridge
+      start_period: 15s

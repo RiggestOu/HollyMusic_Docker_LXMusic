@@ -1,0 +1,196 @@
+/**
+ * 歌曲右键菜单（全局单例，由 context-menu-store 驱动）。
+ *
+ * 设计：
+ * - 桌面：fixed 定位小菜单，边界检测靠右/下翻转，右键或行内"⋯"触发
+ * - 手机（<768px）：同一份菜单项渲染为底部 action sheet（iOS/Android 通用惯例），点遮罩关闭
+ * - outside-click（document mousedown）+ ESC 关闭
+ * - 「加入歌单」自管 AddToPlaylistDialog，零回调透传
+ * - 动作全部走 store action / 现有 hook，与 SongRow 一致
+ */
+
+import { useEffect, useRef, useState } from 'react'
+import { Play, ListPlus, Plus, Heart, ListMusic, Download, Share2, UserMinus } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { useContextMenuStore } from '@/lib/store/context-menu-store'
+import { usePlayerStore } from '@/lib/store/player-store'
+import { useFavoritesStore } from '@/lib/store/favorites-store'
+import { useAuthStore } from '@/hooks/useAuth'
+import { useDownload } from '@/hooks/useDownload'
+import { resolveQuality } from '@/lib/quality-options'
+import { toast } from '@/lib/toast'
+import { shareContent, buildSongShareUrl } from '@/lib/share'
+import { AddToPlaylistDialog } from '../../frontend/src/components/playlists/AddToPlaylistDialog'
+import { getPlaylist, removeSongsFromPlaylist } from '@/lib/api/playlists'
+// ponytail: AddToPlaylistDialog 已移至 frontend/src/components/playlists，
+// 根目录共享代码用相对路径引用 frontend 副本，确保 react-router context 与 BrowserRouter 同源，
+// 避免双副本导致 context 为 null（黑屏 bug 根因）
+
+const MENU_WIDTH = 192
+const MENU_MAX_HEIGHT = 360
+const MOBILE_QUERY = '(max-width: 767px)'
+
+/** 手机端判定（与 AiPlaylistPage 同款 matchMedia 监听，无第三方依赖） */
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches
+  )
+  useEffect(() => {
+    const mql = window.matchMedia(MOBILE_QUERY)
+    const update = () => setIsMobile(mql.matches)
+    mql.addEventListener('change', update)
+    return () => mql.removeEventListener('change', update)
+  }, [])
+  return isMobile
+}
+
+export function SongContextMenu() {
+  const menu = useContextMenuStore(s => s.menu)
+  const close = useContextMenuStore(s => s.close)
+  const playTrack = usePlayerStore(s => s.playTrack)
+  const addNext = usePlayerStore(s => s.addNext)
+  const addToQueue = usePlayerStore(s => s.addToQueue)
+  const uid = menu?.track.uid
+  const isFav = useFavoritesStore(s => s.ids.has(uid ?? ''))
+  const toggleFav = useFavoritesStore(s => s.toggle)
+  const authenticated = useAuthStore(s => s.authenticated)
+  const { download } = useDownload()
+  const [playlistUid, setPlaylistUid] = useState<string | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const isMobile = useIsMobile()
+
+  useEffect(() => {
+    if (!menu) return
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) close()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menu, close])
+
+  // 「加入歌单」弹窗独立于菜单挂载：点「加入歌单」会 close() 菜单，弹窗不能跟着被卸载
+  // （旧结构在下方早返回 null，导致弹窗闪没 + playlistUid 残留，下次开菜单直接弹出弹窗）
+  const playlistDialog = playlistUid && (
+    <AddToPlaylistDialog uid={playlistUid} onClose={() => setPlaylistUid(null)} />
+  )
+
+  if (!menu) return <>{playlistDialog}</>
+  const { track, x, y, playlistId } = menu
+  const left = Math.min(x, window.innerWidth - MENU_WIDTH - 8)
+  const top = Math.min(y, window.innerHeight - MENU_MAX_HEIGHT - 8)
+
+  const handleShare = () => {
+    void shareContent({
+      title: track.name,
+      text: `${track.name} - ${track.artist}`,
+      url: buildSongShareUrl(track.uid),
+    })
+    close()
+  }
+
+  /**
+   * 移出歌单：后端按 position 删除，而菜单只拿到歌曲 uid，
+   * 因此先取一次歌单详情查出 position，再调用移除接口。
+   * 成功后广播 playlist-changed 事件，歌单详情页收到后刷新列表。
+   */
+  const handleRemoveFromPlaylist = async () => {
+    close()
+    if (playlistId == null) return
+    try {
+      const detail = await getPlaylist(playlistId)
+      const entry = detail.entries.find(e => e.songId === track.uid)
+      if (!entry) {
+        toast.error('未找到该歌曲在歌单中的位置')
+        return
+      }
+      await removeSongsFromPlaylist(playlistId, [entry.position])
+      toast.success('已移出歌单')
+      window.dispatchEvent(
+        new CustomEvent('playlist-changed', { detail: { playlistId } })
+      )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '移出歌单失败')
+    }
+  }
+
+  // 两套布局共用的菜单项列表（addNext/addToQueue 入插播队列必生效，toast 恒真）
+  const menuItems = (
+    <>
+      <MenuItem icon={Play} label="播放" onClick={() => { void playTrack(track); close() }} />
+      <MenuItem icon={Plus} label="下一首播放" onClick={() => { addNext(track); toast.info('已加入下一首播放'); close() }} />
+      <MenuItem icon={ListPlus} label="加入队列" onClick={() => { addToQueue(track); toast.info('已加入播放队列'); close() }} />
+      <MenuItem
+        icon={Heart}
+        label={isFav ? '取消收藏' : '收藏'}
+        onClick={() => { void toggleFav(track.uid).catch(() => {}); close() }}
+      />
+      <MenuItem icon={ListMusic} label="加入歌单" onClick={() => { setPlaylistUid(track.uid); close() }} />
+      {playlistId != null && (
+        <MenuItem icon={UserMinus} label="移出歌单" onClick={handleRemoveFromPlaylist} />
+      )}
+      {authenticated && (
+        <MenuItem
+          icon={Download}
+          label="下载"
+          onClick={() => {
+            download({
+              uid: track.uid,
+              quality: resolveQuality(usePlayerStore.getState().quality, track.musicInfo.types),
+            })
+            close()
+          }}
+        />
+      )}
+      <MenuItem icon={Share2} label="分享" onClick={handleShare} />
+    </>
+  )
+
+  return (
+    <>
+      {isMobile ? (
+        // 手机：底部 action sheet，点遮罩关闭
+        <div className="fixed inset-0 z-50 bg-black/50" onClick={close}>
+          <div
+            ref={menuRef}
+            className="safe-area-bottom absolute inset-x-0 bottom-0 max-h-[70vh] overflow-y-auto rounded-t-xl border-t border-border bg-card p-2 pb-3 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+            role="menu"
+          >
+            <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-border" />
+            {menuItems}
+          </div>
+        </div>
+      ) : (
+        // 桌面：原 fixed 定位小菜单
+        <div
+          ref={menuRef}
+          className="fixed z-50 w-48 rounded-md border border-border bg-card p-1 shadow-lg"
+          style={{ left, top }}
+          role="menu"
+        >
+          {menuItems}
+        </div>
+      )}
+      {playlistDialog}
+    </>
+  )
+}
+
+function MenuItem({ icon: Icon, label, onClick }: { icon: LucideIcon; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:py-2"
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </button>
+  )
+}

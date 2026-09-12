@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.next/
 data/
 *.log
 .DS_Store

@@ -1,11 +1,16 @@
 # ============================================================
 # HollyMusic 部署配置
 # ============================================================
-# 镜像：GHCR 自动构建产物
+# 本仓库 = HollyMusic 官方源码（redcatH/HollyMusic）+ 定制功能：
+#   · 歌单歌曲右键菜单「移出歌单」
+#   · 歌单页「导入 / 导出」按钮
+#   · LX Music 音源加载/搜索/播放/下载后端逻辑整合
+#
+# 镜像：本仓库 CI 自动构建并推送到 GHCR
 #   https://github.com/users/RiggestOu/packages/container/package/hollymusic_docker_lxmusic
 #
-# 与原始模板的唯一差异：image 指向本仓库自建镜像
-# （原 ghcr.milu.moe/redcath/hollymusic 为第三方镜像，已弃用）
+# ⚠️ 必填：.env 中需有 AUTH_SECRET（≥32 位随机字符串，生成：openssl rand -hex 32）
+#    首次启动自动建库并运行 Prisma 迁移，数据持久化在 ./prisma_data
 #
 # 使用：docker compose up -d
 # 访问：http://localhost:3099
@@ -43,9 +48,9 @@ services:
 
     environment:
       - NODE_ENV=production
-      # 当前镜像使用 JSON 文件存储（${DATA_DIR}/sources.json），
-      # 以下变量暂未生效，保留以对齐原模板
+      # SQLite 数据库（歌单/收藏等数据持久化在 ./prisma_data，重要！）
       - DATABASE_URL=file:./prisma/data/music.db
+      # 音频磁盘缓存：指向已挂载的 ./cache_data
       - ENABLE_FILE_CACHE=true
       - AUDIO_CACHE_DIR=/app/.cache/audio-cache
       - AUDIO_CACHE_QUOTA_GB=10

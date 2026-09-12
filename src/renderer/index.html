@@ -1,843 +1,193 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HollyMusic</title>
-<style>
-  :root{
-    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
-    --text:#e6e8ee; --dim:#8b93a7; --accent:#4ecdc4; --accent2:#ff6b6b;
-    --red:#f5222d; --shadow:0 8px 30px rgba(0,0,0,.45);
-  }
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-    background:var(--bg);color:var(--text);height:100vh;overflow:hidden;
-    display:flex;flex-direction:column;
-  }
-  button,select,input,textarea{font-family:inherit;font-size:14px;outline:none}
-  button{cursor:pointer}
-  ::-webkit-scrollbar{width:8px;height:8px}
-  ::-webkit-scrollbar-thumb{background:#333a48;border-radius:4px}
-  ::-webkit-scrollbar-thumb:hover{background:#444d5e}
-
-  header{
-    display:flex;align-items:center;gap:14px;padding:12px 18px;
-    background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;
-  }
-  .logo{font-size:19px;font-weight:700;letter-spacing:.5px;
-    background:linear-gradient(90deg,var(--accent2),var(--accent));
-    -webkit-background-clip:text;-webkit-text-fill-color:transparent;white-space:nowrap}
-  .grow{flex:1}
-  .tag{font-size:12px;color:var(--dim);white-space:nowrap}
-  .btn{
-    background:var(--panel2);color:var(--text);border:1px solid var(--line);
-    padding:7px 13px;border-radius:7px;transition:.15s;white-space:nowrap;
-  }
-  .btn:hover{background:#252a35;border-color:#39404e}
-  .btn.primary{background:linear-gradient(135deg,var(--accent2),#e85555);border:none;color:#fff;font-weight:600}
-  .btn.primary:hover{filter:brightness(1.08)}
-  .btn.ghost{background:transparent}
-  .btn.small{padding:4px 9px;font-size:12px}
-  .btn.danger:hover{border-color:var(--red);color:var(--red)}
-
-  main{flex:1;display:flex;min-height:0}
-  .col{display:flex;flex-direction:column;min-height:0}
-  .col.search{flex:1.35;border-right:1px solid var(--line)}
-  .col.playlist{flex:1;min-width:320px}
-
-  .colhead{
-    display:flex;align-items:center;gap:10px;padding:10px 16px;
-    background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;
-  }
-  .colhead h2{font-size:14px;font-weight:600;color:var(--dim);letter-spacing:.5px}
-  .searchbar{display:flex;gap:8px;padding:12px 16px;background:var(--panel);flex:0 0 auto;flex-wrap:wrap}
-  .searchbar input[type=text]{
-    flex:1;min-width:160px;background:var(--panel2);border:1px solid var(--line);
-    border-radius:7px;padding:9px 12px;color:var(--text);
-  }
-  .searchbar input[type=text]:focus{border-color:var(--accent)}
-  .searchbar select{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:9px 10px;color:var(--text)}
-
-  .list{flex:1;overflow-y:auto;padding:6px 0}
-  .row{
-    display:flex;align-items:center;gap:10px;padding:9px 16px;cursor:default;
-    border-bottom:1px solid rgba(255,255,255,.03);user-select:none;
-  }
-  .row:hover{background:rgba(255,255,255,.04)}
-  .row.playing{background:rgba(78,205,196,.10);box-shadow:inset 3px 0 0 var(--accent)}
-  .idx{width:26px;text-align:right;color:var(--dim);font-size:12px;flex:0 0 auto;font-variant-numeric:tabular-nums}
-  .row.playing .idx{color:var(--accent)}
-  .meta{flex:1;min-width:0}
-  .name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .sub{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-  .badge{
-    font-size:11px;padding:2px 7px;border-radius:5px;background:rgba(78,205,196,.14);
-    color:var(--accent);flex:0 0 auto;text-transform:uppercase;letter-spacing:.4px;
-  }
-  .dur{font-size:12px;color:var(--dim);flex:0 0 auto;font-variant-numeric:tabular-nums}
-  .acts{display:flex;gap:6px;flex:0 0 auto;opacity:0;transition:.15s}
-  .row:hover .acts{opacity:1}
-  .iconbtn{
-    background:transparent;border:1px solid transparent;color:var(--dim);
-    border-radius:6px;padding:3px 7px;font-size:12px;
-  }
-  .iconbtn:hover{color:var(--accent);border-color:var(--line);background:var(--panel2)}
-
-  .empty{padding:40px 20px;text-align:center;color:var(--dim);font-size:13px;line-height:1.9}
-
-  footer{
-    flex:0 0 auto;background:var(--panel);border-top:1px solid var(--line);
-    padding:10px 18px;display:flex;align-items:center;gap:16px;
-  }
-  .cover{
-    width:52px;height:52px;border-radius:8px;background:var(--panel2);flex:0 0 auto;
-    object-fit:cover;border:1px solid var(--line);
-  }
-  .np{min-width:0;width:210px;flex:0 0 auto}
-  .np .t{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .np .a{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-  .ctrl{display:flex;align-items:center;gap:8px;flex:0 0 auto}
-  .round{
-    width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--panel2);
-    color:var(--text);display:flex;align-items:center;justify-content:center;font-size:14px;
-  }
-  .round:hover{border-color:var(--accent);color:var(--accent)}
-  .round.play{width:44px;height:44px;background:linear-gradient(135deg,var(--accent2),#e85555);border:none;color:#fff;font-size:16px}
-  .round.play:hover{filter:brightness(1.08)}
-  .progress{flex:1;display:flex;align-items:center;gap:10px;min-width:120px}
-  .progress input[type=range]{flex:1}
-  .time{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .vol{display:flex;align-items:center;gap:7px;flex:0 0 auto}
-  .vol input[type=range]{width:80px}
-  input[type=range]{-webkit-appearance:none;height:4px;border-radius:2px;background:#3a4150;cursor:pointer}
-  input[type=range]::-webkit-slider-thumb{
-    -webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;
-  }
-
-  #ctx{
-    position:fixed;z-index:9999;min-width:200px;background:#1c2029;
-    border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);
-    padding:5px;display:none;
-  }
-  #ctx .item{padding:8px 12px;border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap}
-  #ctx .item:hover{background:rgba(255,255,255,.07)}
-  #ctx .item.danger{color:#ff7875}
-  #ctx .item.danger:hover{background:rgba(245,34,45,.14)}
-  #ctx .sep{height:1px;background:var(--line);margin:5px 4px}
-
-  .mask{
-    position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9000;
-    display:none;align-items:center;justify-content:center;padding:24px;
-  }
-  .mask.show{display:flex}
-  .modal{
-    background:var(--panel);border:1px solid var(--line);border-radius:12px;
-    width:100%;max-width:760px;max-height:86vh;display:flex;flex-direction:column;
-    box-shadow:var(--shadow);
-  }
-  .modal > header{background:transparent;border-bottom:1px solid var(--line);padding:14px 18px;display:block}
-  .modal .body{padding:16px 18px;overflow-y:auto}
-  .modal h3{font-size:15px;margin-bottom:10px}
-  textarea{
-    width:100%;min-height:150px;background:var(--panel2);border:1px solid var(--line);
-    border-radius:8px;padding:11px;color:var(--text);resize:vertical;
-    font-family:ui-monospace,Consolas,monospace;font-size:12px;
-  }
-  .srclist{margin-top:14px;display:flex;flex-direction:column;gap:8px}
-  .srcitem{
-    display:flex;align-items:center;gap:10px;background:var(--panel2);
-    border:1px solid var(--line);border-radius:8px;padding:10px 12px;
-  }
-  .srcitem .m{flex:1;min-width:0}
-  .srcitem .m b{font-size:13px;font-weight:600}
-  .srcitem .m div{font-size:11.5px;color:var(--dim);margin-top:3px}
-  .switch{position:relative;width:38px;height:21px;flex:0 0 auto}
-  .switch input{display:none}
-  .slider{position:absolute;inset:0;background:#39404e;border-radius:11px;transition:.2s}
-  .slider:before{content:"";position:absolute;width:15px;height:15px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
-  .switch input:checked + .slider{background:var(--accent)}
-  .switch input:checked + .slider:before{transform:translateX(17px)}
-
-  #toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);
-    display:flex;flex-direction:column;gap:8px;z-index:10000;align-items:center;pointer-events:none}
-  .toast{background:#232833;border:1px solid var(--line);color:var(--text);
-    padding:9px 16px;border-radius:8px;font-size:13px;box-shadow:var(--shadow);
-    animation:tin .22s ease;max-width:70vw;text-align:center}
-  .toast.err{border-color:#5c2b2e;background:#2a1c1e;color:#ffb3b3}
-  .toast.ok{border-color:#1f4d47;background:#16262a;color:#9fe8e0}
-  @keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HollyMudic - Music Player</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      color: #fff;
+      padding: 40px 20px;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 2.5em;
+      background: linear-gradient(90deg, #ff6b6b, #4ecdc4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      margin-bottom: 40px;
+    }
+    .card {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .card h2 {
+      margin-bottom: 16px;
+      font-size: 1.2em;
+      color: #4ecdc4;
+    }
+    select {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 16px;
+      margin-bottom: 12px;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      cursor: pointer;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 16px;
+      margin-bottom: 12px;
+      background: linear-gradient(90deg, #ff6b6b, #ee5a5a);
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
+    .status {
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+      margin-top: 12px;
+    }
+    .status.ok { background: rgba(46,204,113,0.2); color: #2ecc71; }
+    .status.error { background: rgba(231,76,60,0.2); color: #e74c3c; }
+    textarea {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      resize: vertical;
+      min-height: 150px;
+      margin-bottom: 12px;
+    }
+    .info { text-align: center; color: #666; font-size: 14px; margin-top: 20px; }
+  </style>
 </head>
 <body>
-
-<header>
-  <div class="logo">🎵 HollyMusic</div>
-  <div class="tag" id="statusTag">加载中…</div>
-  <div class="grow"></div>
-  <button class="btn ghost small" id="btnReloadSrc">重载音源</button>
-  <button class="btn" id="btnSources">音源管理</button>
-</header>
-
-<main>
-  <section class="col search">
-    <div class="searchbar">
-      <input type="text" id="kw" placeholder="搜索歌曲 / 歌手 …（回车搜索）">
-      <select id="platform"></select>
-      <button class="btn primary" id="btnSearch">搜索</button>
+  <div class="container">
+    <h1>🎵 HollyMudic</h1>
+    <p class="subtitle">Docker Music Player</p>
+    
+    <div class="card">
+      <h2>音源列表</h2>
+      <select id="sourceSelect">
+        <option value="">加载中...</option>
+      </select>
+      <button onclick="deleteSelected()">删除选中</button>
+      <div id="listStatus" class="status" style="display:none;"></div>
     </div>
-    <div class="colhead">
-      <h2>搜索结果</h2>
-      <div class="grow"></div>
-      <span class="tag" id="searchInfo"></span>
+    
+    <div class="card">
+      <h2>导入新音源</h2>
+      <textarea id="sourceScript" placeholder="粘贴音源脚本..."></textarea>
+      <button onclick="importSource()">导入音源</button>
+      <div id="importStatus" class="status" style="display:none;"></div>
     </div>
-    <div class="list" id="results">
-      <div class="empty">输入关键词开始搜索<br><span style="font-size:12px">提示：在歌曲上点右键可加入歌单</span></div>
-    </div>
-  </section>
-
-  <section class="col playlist">
-    <div class="colhead">
-      <h2>歌单</h2>
-      <span class="tag" id="plInfo">0 首</span>
-      <div class="grow"></div>
-      <button class="btn small ghost" id="btnImportPl" title="从 JSON 文件导入歌单（自动去重）">导入</button>
-      <button class="btn small ghost" id="btnExportPl" title="导出全部歌单为 JSON 文件">导出</button>
-      <button class="btn small ghost" id="btnPlayAll">播放</button>
-      <button class="btn small ghost danger" id="btnClearPl">清空</button>
-    </div>
-    <div class="list" id="playlist">
-      <div class="empty">歌单为空<br><span style="font-size:12px">右键搜索结果中的歌曲 → 添加到歌单</span></div>
-    </div>
-  </section>
-</main>
-
-<footer>
-  <img class="cover" id="cover" alt="">
-  <div class="np">
-    <div class="t" id="npTitle">未播放</div>
-    <div class="a" id="npArtist">—</div>
+    
+    <p class="info">基于 LX Music 音源加载逻辑移植</p>
   </div>
-  <div class="ctrl">
-    <button class="round" id="btnPrev" title="上一首">⏮</button>
-    <button class="round play" id="btnPlay" title="播放/暂停 (空格)">▶</button>
-    <button class="round" id="btnNext" title="下一首">⏭</button>
-  </div>
-  <div class="progress">
-    <span class="time" id="tCur">00:00</span>
-    <input type="range" id="seek" min="0" max="1000" value="0">
-    <span class="time" id="tDur">00:00</span>
-  </div>
-  <select id="quality" title="音质"></select>
-  <div class="vol">
-    <span style="color:var(--dim);font-size:13px">🔊</span>
-    <input type="range" id="vol" min="0" max="100" value="80">
-  </div>
-  <button class="btn small" id="btnDownload" title="下载当前歌曲">下载</button>
-</footer>
-
-<div id="ctx"></div>
-
-<div class="mask" id="srcMask">
-  <div class="modal">
-    <header>
-      <h3 style="margin:0">音源管理</h3>
-      <div style="font-size:12px;color:var(--dim);margin-top:4px">
-        支持 LX Music 自定义源脚本（单文件 .js），脚本在服务端 vm 沙箱中运行。
-      </div>
-      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
-        <button class="btn primary" id="btnImport">导入音源</button>
-        <button class="btn" id="btnReloadSrc2">重新加载</button>
-        <div class="grow"></div>
-        <button class="btn ghost" id="btnCloseSrc">关闭</button>
-      </div>
-    </header>
-    <div class="body">
-      <textarea id="srcText" placeholder="把音源脚本全文粘贴到这里，然后点「导入音源」…"></textarea>
-      <h3 style="margin-top:18px">已导入音源</h3>
-      <div class="srclist" id="srcList"></div>
-      <h3 style="margin-top:18px">平台状态</h3>
-      <div class="srclist" id="platList"></div>
-    </div>
-  </div>
-</div>
-
-<div id="toast"></div>
-<audio id="audio" preload="none"></audio>
-<input type="file" id="plFile" accept=".json,application/json" style="display:none">
-
-<script>
-/* ============================ 状态 ============================ */
-const S = {
-  results: [], playlist: [], current: null, playIndex: -1,
-  platforms: [],
-  quality: localStorage.getItem('hm.quality') || '320k',
-  playMode: 'list',
-}
-const $ = (id) => document.getElementById(id)
-const audio = $('audio')
-
-/* ============================ 工具 ============================ */
-function toast(msg, type) {
-  const el = document.createElement('div')
-  el.className = 'toast' + (type ? ' ' + type : '')
-  el.textContent = msg
-  $('toast').appendChild(el)
-  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300) }, 2800)
-}
-function fmtTime(sec) {
-  sec = Math.max(0, Math.floor(Number(sec) || 0))
-  return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0')
-}
-async function api(url, options) {
-  const r = await fetch(url, options)
-  const text = await r.text()
-  let data
-  try { data = JSON.parse(text) } catch (_) { data = { _raw: text } }
-  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status))
-  return data
-}
-function esc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
-}
-function coverUrl(song) {
-  if (!song) return ''
-  return song.img ? '/api/cover?url=' + encodeURIComponent(song.img)
-                  : '/api/cover?uid=' + encodeURIComponent(song.uid)
-}
-const PLACEHOLDER = 'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%3E%3C/svg%3E'
-
-/* ============================ 启动 ============================ */
-async function boot() {
-  await refreshStatus()
-  await loadPlatforms()
-  await loadPlaylist()
-  bindEvents()
-}
-
-async function refreshStatus() {
-  try {
-    const st = await api('/api/status')
-    $('statusTag').textContent = `音源 ${st.count} 个 · 歌单 ${st.playlistCount} 首 · 端口 ${st.port}`
-    if (st.errors && st.errors.length) {
-      toast('部分音源加载失败：' + st.errors.map(e => e.error).join('；'), 'err')
+  
+  <script>
+    let sources = []
+    
+    async function loadSources() {
+      try {
+        const response = await fetch('/api/sources')
+        sources = await response.json()
+        const select = document.getElementById('sourceSelect')
+        select.innerHTML = '<option value="">请选择音源...</option>'
+        sources.forEach(source => {
+          const option = document.createElement('option')
+          option.value = source.id
+          option.textContent = source.name
+          select.appendChild(option)
+        })
+      } catch (e) {
+        showStatus('listStatus', '加载失败', 'error')
+      }
     }
-  } catch (_) {
-    $('statusTag').textContent = '服务未就绪'
-  }
-}
-
-async function loadPlatforms() {
-  try {
-    const { platforms } = await api('/api/platforms')
-    S.platforms = platforms || []
-    const sel = $('platform')
-    sel.innerHTML = '<option value="all">全部平台</option>'
-    for (const p of S.platforms) {
-      const o = document.createElement('option')
-      o.value = p.id
-      o.textContent = p.name + (p.searchable ? '' : '（不可搜索）')
-      sel.appendChild(o)
+    
+    async function importSource() {
+      const script = document.getElementById('sourceScript').value.trim()
+      if (!script) {
+        showStatus('importStatus', '请输入音源脚本', 'error')
+        return
+      }
+      
+      try {
+        const response = await fetch('/api/sources', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script })
+        })
+        const result = await response.json()
+        
+        if (result.success) {
+          showStatus('importStatus', '导入成功!', 'ok')
+          document.getElementById('sourceScript').value = ''
+          loadSources()
+        } else {
+          showStatus('importStatus', result.error || '导入失败', 'error')
+        }
+      } catch (e) {
+        showStatus('importStatus', '导入失败: ' + e.message, 'error')
+      }
     }
-    renderQualityOptions()
-    renderPlatformStatus()
-  } catch (e) { toast('读取平台失败: ' + e.message, 'err') }
-}
-
-function renderPlatformStatus() {
-  const box = $('platList')
-  if (!S.platforms.length) { box.innerHTML = '<div class="empty">暂无可用平台（请先导入音源）</div>'; return }
-  box.innerHTML = S.platforms.map(p => `
-    <div class="srcitem">
-      <div class="m">
-        <b>${esc(p.name)} <span style="color:var(--dim);font-weight:400">(${esc(p.id)})</span></b>
-        <div>音质：${p.qualitys.map(esc).join(' / ') || '—'}</div>
-        <div>提供音源：${p.sources.length ? p.sources.map(esc).join('、') : '无（仅内置检索，可搜索但无法播放）'}</div>
-      </div>
-      <span class="badge">${p.searchable ? '可搜索' : '仅播放'}</span>
-    </div>`).join('')
-}
-
-function renderQualityOptions() {
-  const plat = $('platform').value
-  const p = S.platforms.find(x => x.id === plat)
-  let list = (p && p.qualitys && p.qualitys.length) ? p.qualitys : ['128k', '320k', 'flac', 'flac24bit']
-  const uniq = Array.from(new Set(list))
-  if (!uniq.includes(S.quality)) S.quality = uniq[0]
-  $('quality').innerHTML = uniq.map(q =>
-    `<option value="${esc(q)}"${q === S.quality ? ' selected' : ''}>${esc(q)}</option>`).join('')
-}
-
-/* ============================ 搜索 ============================ */
-async function doSearch() {
-  const keyword = $('kw').value.trim()
-  if (!keyword) { toast('请输入搜索关键词', 'err'); return }
-  const source = $('platform').value
-  $('results').innerHTML = '<div class="empty">搜索中…</div>'
-  $('searchInfo').textContent = ''
-  try {
-    const data = await api('/api/search?' + new URLSearchParams({ keyword, source, limit: 40 }))
-    S.results = data.list || []
-    renderResults()
-    $('searchInfo').textContent = `${S.results.length} 条 · ` +
-      (data.platforms || []).map(d => `${d.platform}:${d.count || 0}${d.error ? '✗' : ''}`).join('  ')
-    if (!S.results.length) {
-      $('results').innerHTML = '<div class="empty">没有找到结果<br><span style="font-size:12px">换个关键词，或检查音源是否可用</span></div>'
+    
+    async function deleteSelected() {
+      const select = document.getElementById('sourceSelect')
+      const id = select.value
+      if (!id) {
+        showStatus('listStatus', '请先选择音源', 'error')
+        return
+      }
+      
+      try {
+        const response = await fetch('/api/sources', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [id] })
+        })
+        await response.json()
+        showStatus('listStatus', '删除成功', 'ok')
+        loadSources()
+      } catch (e) {
+        showStatus('listStatus', '删除失败', 'error')
+      }
     }
-  } catch (e) {
-    $('results').innerHTML = '<div class="empty">搜索失败：' + esc(e.message) + '</div>'
-    toast('搜索失败: ' + e.message, 'err')
-  }
-}
-
-function renderResults() {
-  $('results').innerHTML = S.results.map((s, i) => `
-    <div class="row" data-kind="search" data-idx="${i}">
-      <span class="idx">${i + 1}</span>
-      <div class="meta">
-        <div class="name">${esc(s.name)}</div>
-        <div class="sub">${esc(s.singer)}${s.albumName ? ' · ' + esc(s.albumName) : ''}</div>
-      </div>
-      <span class="badge">${esc(s.source)}</span>
-      <span class="dur">${fmtTime(s.interval)}</span>
-      <div class="acts">
-        <button class="iconbtn" data-act="play">播放</button>
-        <button class="iconbtn" data-act="add">加入歌单</button>
-      </div>
-    </div>`).join('')
-}
-
-/* ============================ 歌单 ============================ */
-async function loadPlaylist() {
-  try {
-    const data = await api('/api/playlist')
-    S.playlist = data.list || []
-    renderPlaylist()
-  } catch (_) {}
-}
-
-function renderPlaylist() {
-  const box = $('playlist')
-  $('plInfo').textContent = S.playlist.length + ' 首'
-  if (!S.playlist.length) {
-    box.innerHTML = '<div class="empty">歌单为空<br><span style="font-size:12px">右键搜索结果中的歌曲 → 添加到歌单</span></div>'
-    return
-  }
-  box.innerHTML = S.playlist.map((s, i) => `
-    <div class="row${i === S.playIndex ? ' playing' : ''}" data-kind="playlist" data-idx="${i}">
-      <span class="idx">${i === S.playIndex ? '♪' : i + 1}</span>
-      <div class="meta">
-        <div class="name">${esc(s.name)}</div>
-        <div class="sub">${esc(s.singer)}${s.albumName ? ' · ' + esc(s.albumName) : ''}</div>
-      </div>
-      <span class="badge">${esc(s.source)}</span>
-      <span class="dur">${fmtTime(s.interval)}</span>
-      <div class="acts">
-        <button class="iconbtn" data-act="play">播放</button>
-        <button class="iconbtn" data-act="remove">移出歌单</button>
-      </div>
-    </div>`).join('')
-}
-
-async function addToPlaylist(songs, silent) {
-  if (!songs || !songs.length) return
-  try {
-    const r = await api('/api/playlist', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ songs }),
-    })
-    S.playlist = r.list || []
-    renderPlaylist()
-    if (!silent) toast(`已加入歌单（共 ${r.total} 首）`, 'ok')
-  } catch (e) { toast('加入歌单失败: ' + e.message, 'err') }
-}
-
-/** 移出歌单 —— 右键菜单核心功能 */
-async function removeFromPlaylist(uids) {
-  if (!uids || !uids.length) return
-  try {
-    const r = await api('/api/playlist', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uids }),
-    })
-    if (S.current && uids.includes(S.current.uid)) {
-      audio.pause(); $('btnPlay').textContent = '▶'; S.playIndex = -1
+    
+    function showStatus(elementId, message, type) {
+      const el = document.getElementById(elementId)
+      el.textContent = message
+      el.className = 'status ' + type
+      el.style.display = 'block'
+      setTimeout(() => { el.style.display = 'none' }, 3000)
     }
-    S.playlist = r.list || []
-    // 修正播放下标
-    if (S.playIndex >= 0 && S.current) {
-      S.playIndex = S.playlist.findIndex(x => x.uid === S.current.uid)
-    }
-    renderPlaylist()
-    toast(`已移出歌单 ${r.removed} 首`, 'ok')
-  } catch (e) { toast('移出歌单失败: ' + e.message, 'err') }
-}
-
-async function clearPlaylist() {
-  if (!S.playlist.length) return
-  if (!confirm('确定清空歌单？')) return
-  try {
-    await api('/api/playlist', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uids: [] }),
-    })
-    S.playlist = []; S.playIndex = -1
-    audio.pause(); $('btnPlay').textContent = '▶'
-    renderPlaylist()
-    toast('歌单已清空', 'ok')
-  } catch (e) { toast('清空失败: ' + e.message, 'err') }
-}
-
-/* ---------- 歌单导入 / 导出 ---------- */
-
-/** 导出全部歌单为 JSON 文件（浏览器下载） */
-function exportPlaylist() {
-  if (!S.playlist.length) { toast('歌单为空，没有可导出的内容', 'err'); return }
-  const a = document.createElement('a')
-  a.href = '/api/playlist/export'
-  a.download = ''
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  toast(`已导出 ${S.playlist.length} 首（JSON 格式）`, 'ok')
-}
-
-/** 导入歌单文件（自动去重） */
-async function importPlaylistFile(file) {
-  if (!file) return
-  const sizeKB = (file.size / 1024).toFixed(1)
-  try {
-    const text = await file.text()
-    const r = await api('/api/playlist/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    })
-    S.playlist = r.list || []
-    renderPlaylist()
-    await refreshStatus()
-    let msg = `导入完成：新增 ${r.imported} 首`
-    if (r.skipped) msg += `，自动去重跳过 ${r.skipped} 首`
-    if (r.invalid) msg += `，忽略无效 ${r.invalid} 条`
-    toast(msg + `（共 ${r.total} 首）`, 'ok')
-  } catch (e) {
-    toast(`导入失败（${sizeKB}KB）：` + e.message, 'err')
-  }
-}
-
-/* ============================ 播放 ============================ */
-async function playSong(song, playlistIndex) {
-  if (!song) return
-  audio.pause()
-  S.current = song
-  S.playIndex = typeof playlistIndex === 'number' ? playlistIndex : -1
-  renderPlaylist()
-
-  $('npTitle').textContent = song.name || '未知歌曲'
-  $('npArtist').textContent = [song.singer, song.albumName].filter(Boolean).join(' · ') || '—'
-  const c = coverUrl(song)
-  if (c) {
-    $('cover').src = c
-    $('cover').onerror = () => { $('cover').src = PLACEHOLDER }
-  } else {
-    $('cover').src = PLACEHOLDER
-  }
-
-  audio.src = `/api/audio?uid=${encodeURIComponent(song.uid)}&quality=${encodeURIComponent(S.quality)}`
-  try {
-    await audio.play()
-    $('btnPlay').textContent = '⏸'
-    toast(`正在播放：${song.name}（${S.quality}）`, 'ok')
-  } catch (e) {
-    $('btnPlay').textContent = '▶'
-    if (e && e.name === 'AbortError') return
-    toast('播放失败：' + (e && e.message ? e.message : '浏览器拒绝播放'), 'err')
-  }
-}
-
-function togglePlay() {
-  if (!S.current) {
-    if (S.playlist.length) return playSong(S.playlist[0], 0)
-    toast('歌单为空，请先添加歌曲', 'err'); return
-  }
-  if (audio.paused) audio.play().then(() => $('btnPlay').textContent = '⏸').catch(() => {})
-  else { audio.pause(); $('btnPlay').textContent = '▶' }
-}
-
-function nextSong(step) {
-  if (!S.playlist.length) return
-  let i
-  if (S.playMode === 'shuffle') i = Math.floor(Math.random() * S.playlist.length)
-  else {
-    i = (S.playIndex < 0 ? -1 : S.playIndex) + (step || 1)
-    if (i >= S.playlist.length) i = 0
-    if (i < 0) i = S.playlist.length - 1
-  }
-  playSong(S.playlist[i], i)
-}
-
-/** 下一首播放：把歌曲插到指定位置 */
-async function reorderWithNext(song, afterIndex) {
-  if (!S.playlist.some(x => x.uid === song.uid)) await addToPlaylist([song], true)
-  const uids = S.playlist.map(s => s.uid).filter(u => u !== song.uid)
-  uids.splice(Math.min(Math.max(afterIndex, 0), uids.length), 0, song.uid)
-  try {
-    const r = await api('/api/playlist', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uids }),
-    })
-    S.playlist = r.list || []
-    renderPlaylist()
-    toast('已设为下一首播放', 'ok')
-  } catch (e) { toast('操作失败: ' + e.message, 'err') }
-}
-
-/* ============================ 右键菜单 ============================ */
-const ctx = $('ctx')
-
-function buildMenu(kind, idx) {
-  const song = kind === 'search' ? S.results[idx] : S.playlist[idx]
-  if (!song) return []
-  const items = []
-  items.push({ label: '▶  播放', fn: () => playSong(song, kind === 'playlist' ? idx : -1) })
-
-  if (kind === 'playlist') {
-    items.push({ label: '⏭  下一首播放', fn: () => reorderWithNext(song, idx + 1) })
-  } else {
-    items.push({ label: '＋  添加到歌单', fn: () => addToPlaylist([song]) })
-    items.push({ label: '⏭  下一首播放', fn: () => reorderWithNext(song, S.playIndex + 1) })
-  }
-
-  items.push({ label: '⬇  下载', fn: () => {
-    const a = document.createElement('a')
-    a.href = `/api/download?uid=${encodeURIComponent(song.uid)}&quality=${encodeURIComponent(S.quality)}`
-    a.download = ''
-    document.body.appendChild(a); a.click(); a.remove()
-    toast('已开始下载', 'ok')
-  } })
-
-  items.push({ label: '🔗  复制播放链接', fn: async () => {
-    try {
-      const r = await api(`/api/music-url?uid=${encodeURIComponent(song.uid)}&quality=${encodeURIComponent(S.quality)}`)
-      await navigator.clipboard.writeText(r.url)
-      toast(`已复制（音质 ${r.quality}）`, 'ok')
-    } catch (e) { toast('获取链接失败: ' + e.message, 'err') }
-  } })
-
-  if (kind === 'playlist') {
-    items.push({ separator: true })
-    items.push({ label: '✕  移出歌单', danger: true, fn: () => removeFromPlaylist([song.uid]) })
-    items.push({ label: '🗑  清空歌单', danger: true, fn: clearPlaylist })
-  } else {
-    items.push({ separator: true })
-    items.push({ label: '📋  查看歌词', fn: () => showLyric(song) })
-  }
-  return items
-}
-
-function showCtx(x, y, kind, idx) {
-  const items = buildMenu(kind, idx)
-  if (!items.length) return
-  ctx.innerHTML = ''
-  for (const it of items) {
-    if (it.separator) {
-      const d = document.createElement('div'); d.className = 'sep'; ctx.appendChild(d); continue
-    }
-    const d = document.createElement('div')
-    d.className = 'item' + (it.danger ? ' danger' : '')
-    d.textContent = it.label
-    d.addEventListener('click', () => { hideCtx(); it.fn() })
-    ctx.appendChild(d)
-  }
-  ctx.style.display = 'block'
-  ctx.style.left = Math.min(x, window.innerWidth - ctx.offsetWidth - 8) + 'px'
-  ctx.style.top = Math.min(y, window.innerHeight - ctx.offsetHeight - 8) + 'px'
-}
-function hideCtx() { ctx.style.display = 'none' }
-
-async function showLyric(song) {
-  try {
-    const r = await api('/api/lyric?uid=' + encodeURIComponent(song.uid))
-    alert(`${song.name} - ${song.singer}\n\n` + (r.lyric || '(空)'))
-  } catch (_) {
-    toast('该歌曲无可用歌词（音源未提供 lyric 动作）', 'err')
-  }
-}
-
-/* ============================ 音源管理 ============================ */
-async function loadSources() {
-  try {
-    const list = await api('/api/sources')
-    const box = $('srcList')
-    if (!list.length) { box.innerHTML = '<div class="empty">还没有导入任何音源</div>'; return }
-    box.innerHTML = list.map(s => `
-      <div class="srcitem">
-        <div class="m">
-          <b>${esc(s.name)}</b>
-          <div>${esc(s.description || '')}</div>
-          <div>作者：${esc(s.author || '—')} · 版本：${esc(s.version || '—')}</div>
-        </div>
-        <label class="switch" title="启用/停用">
-          <input type="checkbox" data-toggle="${esc(s.id)}" ${s.enabled ? 'checked' : ''}>
-          <span class="slider"></span>
-        </label>
-        <button class="btn small danger" data-del="${esc(s.id)}">删除</button>
-      </div>`).join('')
-  } catch (e) { toast('读取音源失败: ' + e.message, 'err') }
-}
-
-async function importSource() {
-  const script = $('srcText').value.trim()
-  if (!script) { toast('请先粘贴音源脚本内容', 'err'); return }
-  const btn = $('btnImport')
-  btn.disabled = true; btn.textContent = '导入中…'
-  try {
-    const r = await api('/api/sources', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script }),
-    })
-    toast('导入成功：' + (r.source && r.source.name), 'ok')
-    $('srcText').value = ''
-    await loadSources(); await loadPlatforms(); await refreshStatus()
-  } catch (e) {
-    toast('导入失败: ' + e.message, 'err')
-  } finally {
-    btn.disabled = false; btn.textContent = '导入音源'
-  }
-}
-
-async function reloadSources() {
-  try {
-    const st = await api('/api/sources/reload', { method: 'POST' })
-    toast(`已重载：${st.count} 个音源可用`, 'ok')
-    await loadPlatforms(); await refreshStatus()
-    if (st.errors && st.errors.length) toast('部分失败：' + st.errors.map(e => e.error).join('；'), 'err')
-  } catch (e) { toast('重载失败: ' + e.message, 'err') }
-}
-
-/* ============================ 事件 ============================ */
-function bindEvents() {
-  $('btnSearch').onclick = doSearch
-  $('kw').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch() })
-  $('platform').addEventListener('change', () => { renderQualityOptions(); if ($('kw').value.trim()) doSearch() })
-
-  $('btnPlay').onclick = togglePlay
-  $('btnPrev').onclick = () => nextSong(-1)
-  $('btnNext').onclick = () => nextSong(1)
-  $('btnClearPl').onclick = clearPlaylist
-  $('btnPlayAll').onclick = () => S.playlist.length ? playSong(S.playlist[0], 0) : toast('歌单为空', 'err')
-
-  // 歌单导入 / 导出
-  $('btnExportPl').onclick = exportPlaylist
-  $('btnImportPl').onclick = () => $('plFile').click()
-  $('plFile').onchange = (e) => {
-    const f = e.target.files && e.target.files[0]
-    importPlaylistFile(f).finally(() => { e.target.value = '' })
-  }
-
-  $('quality').onchange = (e) => {
-    S.quality = e.target.value
-    localStorage.setItem('hm.quality', S.quality)
-    if (S.current) playSong(S.current, S.playIndex)
-  }
-  $('vol').oninput = (e) => { audio.volume = e.target.value / 100 }
-  audio.volume = 0.8
-
-  audio.addEventListener('timeupdate', () => {
-    const d = audio.duration
-    if (!d || !isFinite(d)) return
-    $('seek').value = String(Math.round((audio.currentTime / d) * 1000))
-    $('tCur').textContent = fmtTime(audio.currentTime)
-    $('tDur').textContent = fmtTime(d)
-  })
-  audio.addEventListener('ended', () => {
-    if (S.playMode === 'single') audio.play().catch(() => {})
-    else nextSong(1)
-  })
-  audio.addEventListener('error', () => {
-    $('btnPlay').textContent = '▶'
-    toast('音频加载失败：该音质可能无版权，换个音质试试', 'err')
-  })
-  $('seek').addEventListener('input', (e) => {
-    const d = audio.duration
-    if (d && isFinite(d)) audio.currentTime = (e.target.value / 1000) * d
-  })
-  $('btnDownload').onclick = () => {
-    if (!S.current) { toast('当前没有播放歌曲', 'err'); return }
-    const a = document.createElement('a')
-    a.href = `/api/download?uid=${encodeURIComponent(S.current.uid)}&quality=${encodeURIComponent(S.quality)}`
-    a.download = ''
-    document.body.appendChild(a); a.click(); a.remove()
-  }
-
-  // 列表：点击按钮 / 双击播放 / 右键菜单
-  for (const id of ['results', 'playlist']) {
-    const box = $(id)
-    box.addEventListener('click', (e) => {
-      const row = e.target.closest('.row'); if (!row) return
-      const kind = row.dataset.kind, idx = Number(row.dataset.idx)
-      const act = e.target.closest('[data-act]')
-      if (!act) return
-      const song = kind === 'search' ? S.results[idx] : S.playlist[idx]
-      if (act.dataset.act === 'play') playSong(song, kind === 'playlist' ? idx : -1)
-      if (act.dataset.act === 'add') addToPlaylist([song])
-      if (act.dataset.act === 'remove') removeFromPlaylist([song.uid])
-    })
-    box.addEventListener('dblclick', (e) => {
-      const row = e.target.closest('.row'); if (!row) return
-      const kind = row.dataset.kind, idx = Number(row.dataset.idx)
-      playSong(kind === 'search' ? S.results[idx] : S.playlist[idx], kind === 'playlist' ? idx : -1)
-    })
-    box.addEventListener('contextmenu', (e) => {
-      const row = e.target.closest('.row'); if (!row) return
-      e.preventDefault()
-      showCtx(e.clientX, e.clientY, row.dataset.kind, Number(row.dataset.idx))
-    })
-  }
-
-  document.addEventListener('click', (e) => { if (!ctx.contains(e.target)) hideCtx() })
-  window.addEventListener('blur', hideCtx)
-  window.addEventListener('resize', hideCtx)
-
-  // 音源管理
-  $('btnSources').onclick = async () => { $('srcMask').classList.add('show'); await loadSources(); renderPlatformStatus() }
-  $('btnCloseSrc').onclick = () => $('srcMask').classList.remove('show')
-  $('btnImport').onclick = importSource
-  $('btnReloadSrc').onclick = reloadSources
-  $('btnReloadSrc2').onclick = reloadSources
-  $('srcMask').addEventListener('click', (e) => { if (e.target === $('srcMask')) $('srcMask').classList.remove('show') })
-  $('srcList').addEventListener('click', async (e) => {
-    const del = e.target.closest('[data-del]'); if (!del) return
-    if (!confirm('确定删除该音源？')) return
-    try {
-      await api('/api/sources', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: [del.dataset.del] }) })
-      toast('已删除', 'ok'); await loadSources(); await loadPlatforms(); await refreshStatus()
-    } catch (err) { toast('删除失败: ' + err.message, 'err') }
-  })
-  $('srcList').addEventListener('change', async (e) => {
-    const t = e.target.closest('[data-toggle]'); if (!t) return
-    try {
-      await api('/api/sources', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: t.dataset.toggle, enabled: t.checked }) })
-      toast(t.checked ? '已启用' : '已停用', 'ok')
-      await loadPlatforms()
-    } catch (err) { toast('操作失败: ' + err.message, 'err') }
-  })
-
-  // 快捷键
-  document.addEventListener('keydown', (e) => {
-    const tag = (e.target.tagName || '').toUpperCase()
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
-    if (e.code === 'Space') { e.preventDefault(); togglePlay() }
-    if (e.ctrlKey && e.code === 'ArrowRight') nextSong(1)
-    if (e.ctrlKey && e.code === 'ArrowLeft') nextSong(-1)
-  })
-}
-
-boot()
-</script>
+    
+    loadSources()
+  </script>
 </body>
 </html>

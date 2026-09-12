@@ -1,0 +1,217 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../lib/generated/prisma"
+  // 同时生成 Windows(native, 本地开发) 与 Linux(Debian 12 bookworm, Docker 运行时) 引擎
+  // 缺少 linux target 时，容器内会报 dlopen failed: cannot find libquery_engine-*.so.node
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model MusicInfo {
+  id        Int      @id @default(autoincrement())
+  source    String
+  songmid   String
+  data      String
+  checksum  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 是否加入推荐白名单（管理员勾选）。推荐接口只从 true 的歌曲中随机抽取。
+  isRecommended Boolean @default(false)
+
+  // Denormalized/searchable fields
+  name           String?   // 歌曲名
+  singer         String?   // 歌手/艺人
+  albumId        String?   // 专辑 id
+  albumName      String?   // 专辑名
+  img            String?   // 封面 URL/路径
+  durationSeconds Int?     // 时长（秒）
+
+  // Source-specific identifiers
+  songId         String?
+  albumMid       String?
+  strMediaMid    String?
+  hash           String?
+  copyrightId    String?
+
+  // Structured JSON fields (kept for flexibility) - store as JSON text for SQLite
+  typesJson      String?
+  typesMapJson   String?
+  typeUrlJson    String?
+
+  // Lyrics / resource URLs
+  lrc            String?
+  lrcUrl         String?
+  mrcUrl         String?
+  trcUrl         String?
+
+  playlistEntries PlaylistEntry[]
+
+  @@unique([source, songmid])
+  @@index([songmid])
+  @@index([name])
+  @@index([singer])
+  @@index([albumId])
+  @@index([albumName])
+  @@index([songId])
+  @@index([isRecommended])
+}
+
+model User {
+  id             Int      @id @default(autoincrement())
+  username       String   @unique
+  subsonicSecret String?  // optional plain secret for t verification (md5(secret+s))
+  lastLogin      DateTime?
+  lastSeen       DateTime?  // 最近一次活跃（登录/心跳）时间，用于在线状态推断
+  lastSeenIp     String?    // 最近一次活跃的客户端 IP
+  lastSeenUa     String?    // 最近一次活跃的 User-Agent
+  // 首次登录或使用弱默认密码时置 true，前端据此强制引导修改密码；
+  // 自助改密或管理员重置后清回 false。不影响 Subsonic 协议鉴权。
+  mustChangePassword Boolean @default(false)
+  // 会话纪元：参与会话 cookie 签名（HMAC(username:sessionVersion)）。
+  // 改密码/管理员重置密码时 +1，该用户所有旧会话立即失效；缺失 holly_sv 的旧 cookie 按 0 兼容。
+  sessionVersion Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  favorites Favorite[]
+  playlists Playlist[]
+  playlistAllowedUsers PlaylistAllowedUser[]
+}
+
+model Favorite {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  itemType  String   // 'song' | 'album' | 'artist'
+  itemId    String   // the id value as passed by client (raw song id / album id / artist id)
+  source    String?  // optional source/origin of the item (may be null)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemType, itemId, source])
+  @@index([itemId])
+}
+
+model Playlist {
+  id             Int      @id @default(autoincrement())
+  name           String
+  username       String
+  comment        String?
+  isPublic       Boolean  @map("public") @default(false)
+  songCount      Int      @default(0)
+  duration       Int?     // seconds
+  createdAt      DateTime @map("created") @default(now())
+  changedAt      DateTime @map("changed") @updatedAt
+  owner          String?
+  coverArt       String?
+
+  user           User     @relation(fields: [username], references: [username], onDelete: Cascade)
+  entries        PlaylistEntry[]
+  allowedUsers   PlaylistAllowedUser[]
+
+  @@index([username])
+  @@index([isPublic])
+}
+
+model PlaylistEntry {
+  id            Int      @id @default(autoincrement())
+  playlistId    Int
+  musicInfoId   Int?
+  songmid       String?
+  position      Int
+  addedBy       String?
+  addedAt       DateTime @default(now())
+  snapshotJson  String?
+  playCount     Int      @default(0)
+  lastPlayed    DateTime?
+
+  playlist      Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  musicInfo     MusicInfo? @relation(fields: [musicInfoId], references: [id], onDelete: SetNull)
+
+  @@unique([playlistId, position])
+  @@index([playlistId])
+  @@index([musicInfoId])
+  @@index([songmid])
+}
+
+model PlaylistAllowedUser {
+  id         Int      @id @default(autoincrement())
+  playlistId Int
+  username   String
+
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [username], references: [username], onDelete: Cascade)
+
+  @@unique([playlistId, username])
+  @@index([username])
+}
+
+model PlayHistory {
+  id          Int      @id @default(autoincrement())
+  playlistId  Int?
+  entryId     Int?
+  musicInfoId Int?
+  songmid     String?
+  username    String?
+  playedAt    DateTime @default(now())
+  clientIp    String?
+  userAgent   String?
+
+  // 同一用户同一首歌只保留一条（再次播放更新 playedAt 移到顶部，商业项目主流做法）
+  @@unique([username, songmid])
+  @@index([playedAt])
+  @@index([username])
+  @@index([playlistId])
+}
+
+/// 服务端音频磁盘缓存索引。
+///
+/// 设计要点（2026-08 重构）：
+/// - DB 只记录「已完整下载」的文件，进行中状态只存内存 Map（失败即删，不留半成品）
+/// - 上游不支持 Range 时：所有客户端从本地文件读，seek 超出已下载部分由调用方等待
+/// - 字段精简为 6 个：cacheKey / filePath / size / contentType / lastAccessAt / id
+model AudioCache {
+  /// 主键
+  id           Int      @id @default(autoincrement())
+  /// 缓存键：`${source}:${songmid}:${quality}`
+  cacheKey     String   @unique
+  /// 相对缓存根目录的文件路径（两级分片：ab/abcdef.mp3）
+  filePath     String
+  /// 上游声明的完整字节数
+  size         Int?
+  /// MIME，用于 serve 时 Content-Type
+  contentType  String?
+  /// 最近一次被读取访问的时间（LRU 淘汰依据）
+  lastAccessAt DateTime @default(now())
+
+  @@index([lastAccessAt])
+}
+
+/// AI 推荐任务（管理员后台批量按歌手/歌曲跑 AI 筛选 → 写推荐白名单）。
+/// 进程内单 worker 串行执行，同一时刻只跑一个，其余 status=queued 排队。
+/// API key 不落库，只在 worker 运行时内存里持有（见 recommend-worker.ts）。
+model RecommendTask {
+  id           String   @id @default(cuid())
+  name         String                    // 任务名
+  taskType     String   @default("artists") // artists(按歌手) | songs(按歌曲)
+  artistsJson  String                    // JSON: 主体列表（歌手名或歌曲名，去重后）
+  configJson   String                    // JSON: {sources, perSource, maxCandidates, concurrency, openaiBaseUrl, openaiModel, extraBody, promptSystem, promptUser}
+  status       String   @default("queued") // queued|running|done|failed|interrupted|cancelled
+  progressJson String   @default("{}")    // JSON: {total, done, currentArtist, results:[...], selectedTotal, addedTotal, failedTotal}
+  error        String?                   // 整体失败原因
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  @@index([status])
+  @@index([createdAt])
+}

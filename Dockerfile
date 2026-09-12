@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -15,16 +15,18 @@ RUN apk add --no-cache \
 
 # 复制 package 文件
 COPY package*.json ./
-COPY src ./src
 
-# 安装依赖
-RUN npm ci
+# 安装依赖（不使用 npm ci，避免需要 package-lock.json）
+RUN npm install --legacy-peer-deps
+
+# 复制源代码
+COPY src ./src
 
 # 构建应用
 RUN npm run build
 
 # 生产阶段
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
@@ -34,7 +36,7 @@ RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefo
 # 复制构建产物
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
-COPY package*.json ./
+COPY --from=builder /app/package.json ./
 
 # 创建数据目录
 RUN mkdir -p /data/config

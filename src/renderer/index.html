@@ -3,89 +3,191 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HollyMudic - 音乐播放器</title>
+  <title>HollyMudic - Music Player</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1a1a2e;
-      color: #eee;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
       min-height: 100vh;
+      color: #fff;
+      padding: 40px 20px;
     }
-    
-    #app {
-      padding: 20px;
-    }
-    
+    .container { max-width: 800px; margin: 0 auto; }
     h1 {
       text-align: center;
-      margin-bottom: 30px;
-      color: #e94560;
+      margin-bottom: 10px;
+      font-size: 2.5em;
+      background: linear-gradient(90deg, #ff6b6b, #4ecdc4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
-    
-    .source-selector {
-      max-width: 600px;
-      margin: 0 auto;
-      background: #16213e;
-      padding: 20px;
-      border-radius: 10px;
+    .subtitle {
+      text-align: center;
+      color: #888;
+      margin-bottom: 40px;
     }
-    
-    .source-selector h2 {
-      margin-bottom: 15px;
-      color: #0f3460;
+    .card {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      border: 1px solid rgba(255,255,255,0.1);
     }
-    
+    .card h2 {
+      margin-bottom: 16px;
+      font-size: 1.2em;
+      color: #4ecdc4;
+    }
     select {
       width: 100%;
       padding: 12px;
-      font-size: 16px;
+      border-radius: 8px;
       border: none;
-      border-radius: 5px;
-      background: #0f3460;
+      font-size: 16px;
+      margin-bottom: 12px;
+      background: rgba(255,255,255,0.1);
       color: #fff;
       cursor: pointer;
     }
-    
+    button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 16px;
+      margin-bottom: 12px;
+      background: linear-gradient(90deg, #ff6b6b, #ee5a5a);
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
     .status {
-      margin-top: 20px;
-      padding: 10px;
-      border-radius: 5px;
+      padding: 12px;
+      border-radius: 8px;
       text-align: center;
+      margin-top: 12px;
     }
-    
-    .status.ok {
-      background: #2ecc71;
+    .status.ok { background: rgba(46,204,113,0.2); color: #2ecc71; }
+    .status.error { background: rgba(231,76,60,0.2); color: #e74c3c; }
+    textarea {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+      background: rgba(255,255,255,0.1);
       color: #fff;
+      resize: vertical;
+      min-height: 150px;
+      margin-bottom: 12px;
     }
-    
-    .status.error {
-      background: #e74c3c;
-      color: #fff;
-    }
+    .info { text-align: center; color: #666; font-size: 14px; margin-top: 20px; }
   </style>
 </head>
 <body>
-  <div id="app">
-    <h1>🎵 HollyMudic Music Player</h1>
-    <div class="source-selector">
-      <h2>音源选择</h2>
-      <select v-model="currentSource">
-        <option value="">请选择音源...</option>
-        <option v-for="api in sourceList" :key="api.id" :value="api.id">
-          {{ api.name }}
-        </option>
+  <div class="container">
+    <h1>🎵 HollyMudic</h1>
+    <p class="subtitle">Docker Music Player</p>
+    
+    <div class="card">
+      <h2>音源列表</h2>
+      <select id="sourceSelect">
+        <option value="">加载中...</option>
       </select>
-      <div v-if="statusMessage" :class="['status', statusType]">
-        {{ statusMessage }}
-      </div>
+      <button onclick="deleteSelected()">删除选中</button>
+      <div id="listStatus" class="status" style="display:none;"></div>
     </div>
+    
+    <div class="card">
+      <h2>导入新音源</h2>
+      <textarea id="sourceScript" placeholder="粘贴音源脚本..."></textarea>
+      <button onclick="importSource()">导入音源</button>
+      <div id="importStatus" class="status" style="display:none;"></div>
+    </div>
+    
+    <p class="info">基于 LX Music 音源加载逻辑移植</p>
   </div>
-  <script type="module" src="./main.ts"></script>
+  
+  <script>
+    let sources = []
+    
+    async function loadSources() {
+      try {
+        const response = await fetch('/api/sources')
+        sources = await response.json()
+        const select = document.getElementById('sourceSelect')
+        select.innerHTML = '<option value="">请选择音源...</option>'
+        sources.forEach(source => {
+          const option = document.createElement('option')
+          option.value = source.id
+          option.textContent = source.name
+          select.appendChild(option)
+        })
+      } catch (e) {
+        showStatus('listStatus', '加载失败', 'error')
+      }
+    }
+    
+    async function importSource() {
+      const script = document.getElementById('sourceScript').value.trim()
+      if (!script) {
+        showStatus('importStatus', '请输入音源脚本', 'error')
+        return
+      }
+      
+      try {
+        const response = await fetch('/api/sources', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script })
+        })
+        const result = await response.json()
+        
+        if (result.success) {
+          showStatus('importStatus', '导入成功!', 'ok')
+          document.getElementById('sourceScript').value = ''
+          loadSources()
+        } else {
+          showStatus('importStatus', result.error || '导入失败', 'error')
+        }
+      } catch (e) {
+        showStatus('importStatus', '导入失败: ' + e.message, 'error')
+      }
+    }
+    
+    async function deleteSelected() {
+      const select = document.getElementById('sourceSelect')
+      const id = select.value
+      if (!id) {
+        showStatus('listStatus', '请先选择音源', 'error')
+        return
+      }
+      
+      try {
+        const response = await fetch('/api/sources', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [id] })
+        })
+        await response.json()
+        showStatus('listStatus', '删除成功', 'ok')
+        loadSources()
+      } catch (e) {
+        showStatus('listStatus', '删除失败', 'error')
+      }
+    }
+    
+    function showStatus(elementId, message, type) {
+      const el = document.getElementById(elementId)
+      el.textContent = message
+      el.className = 'status ' + type
+      el.style.display = 'block'
+      setTimeout(() => { el.style.display = 'none' }, 3000)
+    }
+    
+    loadSources()
+  </script>
 </body>
 </html>

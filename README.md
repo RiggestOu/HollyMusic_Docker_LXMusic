@@ -1,46 +1,26 @@
-# HollyMudic - Docker Music Player
+# HollyMusic Docker Music Player
 
 基于 LX Music 音源加载逻辑的 Docker 化音乐播放器。
 
 ## 快速开始
 
+### Docker 部署
 ```bash
-# 安装依赖
-npm install
-
-# 开发模式
-npm run dev
-
-# 构建
-npm run build
-
-# Docker 部署
-npm run docker:build
-npm run docker:run
-```
-
-## Docker 部署
-
-```bash
-docker-compose up -d
+docker build -t holly-mudic:latest .
+docker run -d -p 3080:3080 -v $(pwd)/data:/data/config holly-mudic:latest
 ```
 
 访问 http://localhost:3080
 
-## 功能特性
+## API 接口
 
-- 🎵 多音源支持（酷我、腾讯、酷狗、咪咕、网易云）
-- 🐳 Docker 容器化部署
-- 📦 自定义音源导入/导出
-- 🔒 沙箱隔离执行
-- 💾 持久化配置存储
+- `GET /api/sources` - 获取音源列表
+- `POST /api/sources` - 导入音源
+- `DELETE /api/sources` - 删除音源
+- `GET /api/health` - 健康检查
 
-## 项目结构
+## 技术栈
 
-```
-src/
-├── common/          # 公共类型和常量
-├── main/           # Electron 主进程
-│   └── modules/source/  # 音源管理模块
-└── renderer/       # Vue 渲染进程
-```
+- Node.js 22
+- Express.js
+- Alpine Linux

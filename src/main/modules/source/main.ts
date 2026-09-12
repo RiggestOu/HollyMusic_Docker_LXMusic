@@ -19,6 +19,7 @@ const denyEvents = [
   'media-started-playing',
 ] as const
 
+
 export const getProxy = () => {
   if (global.lx.appSetting['network.proxy.enable'] && global.lx.appSetting['network.proxy.host']) {
     return {

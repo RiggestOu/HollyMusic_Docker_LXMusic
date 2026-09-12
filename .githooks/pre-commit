@@ -1,0 +1,27 @@
+#!/bin/sh
+# Pre-commit guard: block commits that still contain merge conflict markers.
+#
+# Why: this repo previously pushed ci.yml / Dockerfile / entrypoint.sh with
+#      "<<<<<<< HEAD" markers left in them, which made GitHub Actions report
+#      "Invalid workflow file - error in your yaml syntax".
+#
+# Note: uses only git built-ins (git grep). No external grep/sed/awk is
+#       required, because Git for Windows' bundled sh may lack them.
+#
+# Disable with: git config --unset core.hooksPath
+
+hits=$(git grep --cached -n -I -E '^(<{7} |<{7}$|={7}$|>{7} )' -- . 2>/dev/null)
+
+if [ -n "$hits" ]; then
+  echo ""
+  echo "[pre-commit] BLOCKED: merge conflict markers found in staged content"
+  echo "----------------------------------------------------------------"
+  echo "$hits"
+  echo "----------------------------------------------------------------"
+  echo "Remove the <<<<<<< / ======= / >>>>>>> lines, then commit again."
+  echo "To bypass this check once: git commit --no-verify"
+  echo ""
+  exit 1
+fi
+
+exit 0

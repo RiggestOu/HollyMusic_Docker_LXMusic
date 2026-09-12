@@ -100,23 +100,118 @@ csv 无法表达嵌套字段。JSON 能完整保留平台与歌曲 ID（`source`
 
 ### 拉取与更新
 
-```bash
-# 用 latest（推荐日常使用）
-docker compose pull && docker compose up -d --force-recreate
+**推荐做法**：compose 里保留 `:latest` 并加上 `pull_policy: always`，
+每次 `up`／重建都会向注册表核对 digest，有新版本才下载：
 
-# 或锁定具体版本（避免任何缓存歧义）
-docker pull ghcr.io/riggestou/hollymusic_docker_lxmusic:build-12
+```yaml
+services:
+  app:
+    image: ghcr.io/riggestou/hollymusic_docker_lxmusic:latest
+    pull_policy: always      # ★ 不加这行可能一直跑旧镜像
 ```
 
-**验证容器里是不是新代码**（旧镜像没有 `src/main/lx/`）：
+**`always` 的代价很小**：它只是请求 manifest 比对 digest（几 KB、1~2 秒）；
+digest 未变时**不会重新下载任何层**，直接复用本地镜像。变化时也只下载差异层。
+
+想更省，可用 `daily` / `weekly` / `every_12h`（距上次拉取超过该时长才核对一次），
+但这些是较新的策略值，需较新的 Compose 版本支持，群晖上可能不认。
+
+**正确的手动更新命令**（只有镜像真的变了才会重建容器）：
 
 ```bash
-docker exec holly-music ls /app/src/main/     # 应看到 lx 目录
-curl http://localhost:3099/api/status          # 旧镜像会返回 404
+docker compose pull && docker compose up -d
 ```
 
-> ⚠️ 在群晖 / 威联通 Docker 界面里点「重新启动容器」**不会重新拉取镜像**，
-> 必须「拉取镜像 → 重置/重新创建容器」，或直接用上面的命令。
+> 注意：**不要加 `--force-recreate`** —— 它会无视镜像是否变化、强制重启容器，
+> 与"只在有更新时才动"的目标相反。`docker compose up -d` 自身会在镜像 ID 或配置变化时才重建。
+
+**⚠️ 为什么必须加 `pull_policy: always`**：Compose 默认策略是 `missing` ——
+**本地已存在同名 tag 就不拉取**。所以"删除容器再重建"往往仍然是旧镜像。
+
+**群晖 Container Manager 用户注意**：Container Manager **不会**为 ghcr.io（非 Docker Hub）
+的镜像显示"有更新"提示，且点「重新启动容器」不会拉取镜像。可靠流程是：
+
+1. 项目 → Action → **停止**
+2. 项目 → Action → **清理**（Clean，删除容器，不影响数据卷）
+3. **镜像** 标签页 → **删除** `hollymusic_docker_lxmusic` 镜像
+4. 回到项目 → Action → **构建** → 此时本地无镜像，必然拉取最新
+
+或者直接改用精确 tag，本地不存在该 tag 时必定拉取，不受 Compose 版本与策略影响：
+
+```yaml
+image: ghcr.io/riggestou/hollymusic_docker_lxmusic:build-11
+```
+
+### 全自动更新（可选）
+
+**Watchtower 是「定时轮询」，不是「监听 GitHub 推送」** —— 它不知道你的构建何时完成，
+而是按 `--interval` 周期性地去注册表核对镜像 digest：
+
+```
+git push → GitHub Actions 构建 → 推送新镜像到 GHCR
+                                        ↓
+                     （Watchtower 下一次轮询时才发现，延迟 ≤ 一个 interval）
+                                        ↓
+                            增量拉取差异层 → 重启容器
+```
+
+```bash
+docker run -d --name watchtower --restart unless-stopped \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  containrrr/watchtower --interval 3600 --cleanup holly-music
+```
+
+- `--interval 3600` 每小时核对一次（想更快就调小，如 600 = 10 分钟）
+- `--cleanup` 更新后清理旧镜像（**共享的基础层受引用计数保护，不会被删**，不影响下次增量拉取）
+- 末尾 `holly-music` 是容器名，只管理这一个，不碰 NAS 上其他服务
+- 没有新构建时**零下载**，只有一次 manifest 请求（几 KB）
+
+#### 拉取是增量还是全量？
+
+**只拉取差异层**，不是整个镜像重下。Docker 镜像由多个 content-addressed 层组成，
+拉取时逐层比对本地是否已有该 digest 的层：已有则跳过（日志显示 `Already exists`），
+没有才下载。本项目的 Dockerfile 中 `FROM node:22-alpine`、`apk add wget`、
+`npm install --production` 这些层在代码改动时不会变，**会被完整复用**，
+通常每次更新只下载几百 KB ～ 几 MB。
+
+#### 想「构建成功即刻更新」（零延迟）
+
+Watchtower 可开启 HTTP API，由 CI 在构建成功后直接回调触发：
+
+```bash
+# Watchtower 启动参数加上：
+  --http-api-update --http-api-token <你的随机token>
+```
+
+```yaml
+# .github/workflows/build.yml 末尾加一步
+      - name: Trigger NAS update
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            https://<你的域名>/v1/update || true
+```
+
+> ⚠️ **安全提醒**：这要求 GitHub 的 runner 能访问到你的 NAS，
+> 意味着需要公网暴露或内网穿透 —— 请务必走 HTTPS 反代 + 强 Token，
+> 并只暴露 `/v1/update` 这一个端点。若不希望暴露 NAS，
+> **用群晖计划任务定时轮询是更安全的选择**。
+
+> 群晖计划任务等价写法（定时执行）：
+> `cd /volume1/docker/holly-music && docker compose pull && docker compose up -d`
+
+### 验证更新是否生效
+
+```bash
+# 1) 容器里有没有新代码（旧镜像没有 lx 目录）
+docker exec holly-music ls /app/src/main/
+
+# 2) 接口（旧镜像没有 /api/status，会返回 404）
+curl http://<NAS-IP>:3099/api/status
+
+# 3) 看容器用的镜像 ID 与创建时间
+docker inspect holly-music --format '{{.Image}} / {{.Created}}'
+```
 
 ## 接口
 

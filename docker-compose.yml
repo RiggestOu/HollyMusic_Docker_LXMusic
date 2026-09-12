@@ -20,6 +20,21 @@ services:
     image: ghcr.io/riggestou/hollymusic_docker_lxmusic:latest
     container_name: holly-music
 
+    # ★ 镜像更新策略（选一个，默认 missing 是"本地有就不拉"，最容易踩坑）
+    #
+    #   always      —— 每次 up/重建都向注册表核对 digest。
+    #                  代价极小：只是几次 HTTP 请求（几 KB、1~2 秒），
+    #                  digest 不变时【不会】重新下载任何层，秒过。
+    #   daily       —— 距上次拉取超过 24h 才核对一次（语义更省，但需较新 Compose）
+    #   every_12h   —— 每 12h 核对一次（同上，需较新 Compose）
+    #   missing     —— 默认值：本地已有同名 tag 就不拉（不推荐，会一直跑旧镜像）
+    #   never       —— 从不拉取（离线环境用）
+    #
+    # 若你的 Compose 版本较旧、构建时报错提示不认识该字段，
+    # 删掉本行即可，改用「群晖计划任务定时执行 docker compose pull && up -d」
+    # 或直接把 tag 改成精确版本号（如 build-11）。
+    pull_policy: always
+
     ports:
       - "3099:3000"
 

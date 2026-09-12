@@ -81,6 +81,43 @@ csv 无法表达嵌套字段。JSON 能完整保留平台与歌曲 ID（`source`
 
 导入的歌曲会立即注册到播放缓存，无需重新搜索即可播放。
 
+## 镜像与版本
+
+镜像地址：`ghcr.io/riggestou/hollymusic_docker_lxmusic`
+
+每次 `push` 到 `main`/`master` 会自动构建并推送 **3 个 tag**（同一个包下新增"版本"，不会新增"包"）：
+
+| Tag | 说明 |
+|-----|------|
+| `latest` | 永远指向最新构建 |
+| `<commit-sha>` | 完整 40 位提交哈希，精确锁定某次提交，便于回滚排查 |
+| `build-<N>` | 递增序号，每次推送都会多一条，最便于辨认"更新了哪一版" |
+
+> **关于 GitHub Packages 页面**：该页面第一层列的是「包（package）」，
+> 本项目始终只有 1 个包，所以条目数不会变。
+> "更新"体现在**包详情页的版本列表**（Recent tagged image versions）与 **Last published** 时间上。
+> 查看入口：<https://github.com/users/RiggestOu/packages/container/package/hollymusic_docker_lxmusic>
+
+### 拉取与更新
+
+```bash
+# 用 latest（推荐日常使用）
+docker compose pull && docker compose up -d --force-recreate
+
+# 或锁定具体版本（避免任何缓存歧义）
+docker pull ghcr.io/riggestou/hollymusic_docker_lxmusic:build-12
+```
+
+**验证容器里是不是新代码**（旧镜像没有 `src/main/lx/`）：
+
+```bash
+docker exec holly-music ls /app/src/main/     # 应看到 lx 目录
+curl http://localhost:3099/api/status          # 旧镜像会返回 404
+```
+
+> ⚠️ 在群晖 / 威联通 Docker 界面里点「重新启动容器」**不会重新拉取镜像**，
+> 必须「拉取镜像 → 重置/重新创建容器」，或直接用上面的命令。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |

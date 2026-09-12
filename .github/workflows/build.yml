@@ -41,7 +41,15 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
+          # 同一个包下会产生 3 个 tag（不会新增"包"，只新增"版本"）：
+          #   latest        —— 永远指向最新构建
+          #   <commit-sha>  —— 精确锁定某次提交，便于回滚排查
+          #   build-<N>     —— 递增且好认，每次推送都会多一条
           tags: |
             ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:latest
             ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:build-${{ github.run_number }}
           platforms: linux/amd64
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}

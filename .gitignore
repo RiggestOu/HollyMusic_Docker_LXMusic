@@ -1,0 +1,22 @@
+# 构建输出
+dist/
+out/
+
+# 依赖
+node_modules/
+
+# 数据文件
+data/
+*.sqlite
+*.db
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# 日志
+*.log

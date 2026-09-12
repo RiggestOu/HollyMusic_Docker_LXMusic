@@ -1,0 +1,31 @@
+{
+  "name": "holly-mudic",
+  "version": "1.0.0",
+  "description": "Docker-based music player with LX Music source loading logic",
+  "main": "dist/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "docker:build": "docker build -t holly-mudic:latest .",
+    "docker:run": "docker run -d -p 3080:3080 -v $(pwd)/data:/data/config holly-mudic:latest",
+    "docker:compose": "docker-compose up -d",
+    "docker:stop": "docker-compose down",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "electron-vite": "^2.0.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0",
+    "vue": "^3.4.0"
+  },
+  "author": "HollyMudic",
+  "license": "Apache-2.0"
+}

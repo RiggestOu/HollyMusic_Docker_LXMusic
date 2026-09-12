@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HollyMudic - 音乐播放器</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+    }
+    
+    #app {
+      padding: 20px;
+    }
+    
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+      color: #e94560;
+    }
+    
+    .source-selector {
+      max-width: 600px;
+      margin: 0 auto;
+      background: #16213e;
+      padding: 20px;
+      border-radius: 10px;
+    }
+    
+    .source-selector h2 {
+      margin-bottom: 15px;
+      color: #0f3460;
+    }
+    
+    select {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      background: #0f3460;
+      color: #fff;
+      cursor: pointer;
+    }
+    
+    .status {
+      margin-top: 20px;
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+    }
+    
+    .status.ok {
+      background: #2ecc71;
+      color: #fff;
+    }
+    
+    .status.error {
+      background: #e74c3c;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>🎵 HollyMudic Music Player</h1>
+    <div class="source-selector">
+      <h2>音源选择</h2>
+      <select v-model="currentSource">
+        <option value="">请选择音源...</option>
+        <option v-for="api in sourceList" :key="api.id" :value="api.id">
+          {{ api.name }}
+        </option>
+      </select>
+      <div v-if="statusMessage" :class="['status', statusType]">
+        {{ statusMessage }}
+      </div>
+    </div>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

@@ -8,7 +8,7 @@
 import { usePlayerStore } from '@/lib/store/player-store'
 import { ProgressBar } from './ProgressBar'
 import { PlayerButton } from './PlayerButton'
-import { Mic2, ListMusic, Timer, Volume2, VolumeX } from 'lucide-react'
+import { Mic2, ListMusic, Timer, Volume2, VolumeX, Sparkles } from 'lucide-react'
 
 export function PlayerTools() {
   const volume = usePlayerStore(s => s.volume)
@@ -17,6 +17,7 @@ export function PlayerTools() {
   const toggleMute = usePlayerStore(s => s.toggleMute)
   const toggleQueue = usePlayerStore(s => s.toggleQueue)
   const toggleLyrics = usePlayerStore(s => s.toggleLyrics)
+  const toggleParticle = usePlayerStore(s => s.toggleParticle)
   const sleepTimer = usePlayerStore(s => s.sleepTimer)
   const cycleSleepTimer = usePlayerStore(s => s.cycleSleepTimer)
 
@@ -24,6 +25,7 @@ export function PlayerTools() {
 
   return (
     <div className="hidden items-center justify-end gap-1 md:flex md:w-[30%]">
+      <PlayerButton icon={Sparkles} label="粒子" onClick={toggleParticle} showLabel />
       <PlayerButton icon={Mic2} label="歌词" onClick={toggleLyrics} showLabel />
       <PlayerButton icon={ListMusic} label="队列" onClick={toggleQueue} showLabel />
       <PlayerButton

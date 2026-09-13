@@ -84,6 +84,7 @@ interface PlayerStore {
   // UI 面板
   isQueueOpen: boolean
   isLyricsOpen: boolean
+  isParticleOpen: boolean
 
   // 核心动作
   playTrack: (track: Track, queue?: Track[]) => Promise<void>
@@ -121,6 +122,8 @@ interface PlayerStore {
   setQueueOpen: (v: boolean) => void
   toggleLyrics: () => void
   setLyricsOpen: (v: boolean) => void
+  toggleParticle: () => void
+  setParticleOpen: (v: boolean) => void
 
   // 睡眠定时器
   cycleSleepTimer: () => void
@@ -155,6 +158,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
 
   isQueueOpen: false,
   isLyricsOpen: false,
+  isParticleOpen: false,
 
   playTrack: async (track, newQueue) => {
     if (newQueue && newQueue.length > 0) {
@@ -404,6 +408,8 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   setQueueOpen: (v) => set({ isQueueOpen: v }),
   toggleLyrics: () => set(s => ({ isLyricsOpen: !s.isLyricsOpen })),
   setLyricsOpen: (v) => set({ isLyricsOpen: v }),
+  toggleParticle: () => set(s => ({ isParticleOpen: !s.isParticleOpen })),
+  setParticleOpen: (v) => set({ isParticleOpen: v }),
 
   cycleSleepTimer: () => {
     const cur = get().sleepTimer

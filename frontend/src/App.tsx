@@ -13,6 +13,8 @@ import { ServiceWorkerRegister } from './components/ServiceWorkerRegister'
 import { PlayerBar } from '@/components/player/PlayerBar'
 import { QueuePanel } from '@/components/player/QueuePanel'
 import { LyricsPanel } from '@/components/player/LyricsPanel'
+import { ParticlePanel } from '@/components/player/ParticlePanel'
+import { DesktopBridge } from '@/components/player/DesktopBridge'
 import { ToastContainer } from '@/components/toast/ToastContainer'
 import { SongContextMenu } from '@/components/shared/SongContextMenu'
 import { useFavoritesStore } from '@/lib/store/favorites-store'
@@ -31,6 +33,10 @@ import { HistoryPage } from './routes/HistoryPage'
 import { LoginPage } from './routes/LoginPage'
 import { ChangePasswordPage } from './routes/ChangePasswordPage'
 import { AdminPage, AdminUsersPage, AdminSourcesPage, AdminRecommendPage } from './routes/AdminPage'
+// 桌面端（Tauri 外壳）专用页：由外壳在独立窗口中加载，不参与主布局与登录守卫
+import { WallpaperPage } from './routes/WallpaperPage'
+import { DesktopLyricsPage } from './routes/DesktopLyricsPage'
+import { DesktopSettingsPage } from './routes/DesktopSettingsPage'
 
 export function App() {
   const location = useLocation()
@@ -134,6 +140,20 @@ export function App() {
     )
   }
 
+  // 桌面端专用页：桌面壁纸 / 桌面歌词 / 桌面设置。
+  // 这三个页面被 Tauri 外壳放在独立窗口里（壁纸挂在桌面层、歌词透明置顶），
+  // 因此必须跳过登录守卫与主布局——它们只需要自己的一块画布 / 一行文字。
+  // 在普通浏览器里直接访问也只是普通页面，不影响既有流程。
+  if (
+    location.pathname === '/wallpaper' ||
+    location.pathname === '/lyrics' ||
+    location.pathname === '/settings'
+  ) {
+    if (location.pathname === '/wallpaper') return <WallpaperPage />
+    if (location.pathname === '/lyrics') return <DesktopLyricsPage />
+    return <DesktopSettingsPage />
+  }
+
   if (authenticated === null) return <div className="min-h-screen bg-background" />
   if (authenticated === false) return null
   if (mustChangePassword && location.pathname !== '/change-password') return <Navigate to="/change-password" replace />
@@ -174,6 +194,7 @@ export function App() {
       <MobileSidebar open={drawerOpen} onClose={() => setDrawerOpen(false)} />
       <QueuePanel />
       <LyricsPanel audio={audioElement} />
+      <ParticlePanel audio={audioElement} />
       <SongContextMenu />
       <ToastContainer />
     </div>

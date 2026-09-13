@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "HollyMusic 桌面端默认权限：主窗口 / 壁纸窗口 / 歌词窗口 / 设置窗口",
+  "windows": ["main", "wallpaper", "lyrics", "settings"],
+  "permissions": [
+    "core:default"
+  ]
+}

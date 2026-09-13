@@ -23,8 +23,11 @@ function reportPlayIfAuthed(musicInfo: Track['musicInfo']) {
 // ---- 音质偏好持久化（项目无 zustand persist，直接读写 localStorage）----
 const QUALITY_KEY = 'player:quality'
 const VALID_QUALITIES: QualityType[] = ['128k', '320k', 'flac', 'flac24bit']
-/** 默认音质（320k 平衡音质与带宽/缓存）；用户手动切换后以 localStorage 记忆为准 */
-const DEFAULT_QUALITY: QualityType = '320k'
+/** 默认音质（flac24bit = 最高档）：resolveQuality 对取不到的档会自动落到歌曲支持的
+ *  就近最高档，故偏好设为最高即「默认自动选最高质量播放」；
+ *  浏览器解不了 FLAC 时由 codecCap 启动探测 + 解码失败降级重试兜底。
+ *  用户手动切换后以 localStorage 记忆为准 */
+const DEFAULT_QUALITY: QualityType = 'flac24bit'
 
 /** 可降级重试的浏览器 audio 错误码（MediaError）：3=DECODE 4=SRC_NOT_SUPPORTED。
  *  这两种通常是「浏览器解不了该格式」（典型：手机 WebView 解不了 FLAC），降一档换 MP3 即可播。
@@ -318,12 +321,16 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
       // 若此处直接 set isPlaying:true，值与上一渲染相同，PlayerBar 监听 isPlaying 的
       // effect 不会重新触发 → 引擎收不到 play() → 「播完一首就停在开头」。
       // 故先同步置 false（让 effect 走一次 pause 分支，对已 ended 的音频无副作用），
-      // 再用微任务置回 true，强制 isPlaying 经历 false→true 过渡以触发引擎 play()；
+      // 再用【宏任务】置回 true，强制 isPlaying 经历 false→true 过渡以触发引擎 play()；
       // 同时把进度 seek 回 0。
+      // ⚠️ 必须用 setTimeout(0) 而不是 queueMicrotask：React 18 并发调度下，
+      // 微任务里的第二次 set 可能与第一次合并在同一次 render（true→true 视为无变化），
+      // effect 依旧不触发——这正是上一版修复在线上仍然失效的根因。
+      // 宏任务保证跨过一次完整的 render+commit，false→true 必然两次独立渲染。
       set({ currentTime: 0, seekTarget: 0, seekNonce: get().seekNonce + 1, isPlaying: false })
-      queueMicrotask(() => {
+      setTimeout(() => {
         set({ isPlaying: true })
-      })
+      }, 0)
       return
     }
     // 顺序播放 / 随机：播完当前曲统一走 next()；

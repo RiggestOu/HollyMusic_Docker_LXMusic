@@ -1,9 +1,23 @@
-node_modules/
+# 构建输出
 dist/
-.next/
+out/
+
+# 依赖
+node_modules/
+
+# 数据文件
 data/
-*.log
+*.sqlite
+*.db
+
+# 系统文件
 .DS_Store
 Thumbs.db
-.git/
+
+# IDE
+.vscode/
+.idea/
+
+# 日志
+*.log
 .workbuddy/

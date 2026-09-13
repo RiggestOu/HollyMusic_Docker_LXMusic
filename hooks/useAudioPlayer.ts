@@ -379,6 +379,11 @@ export function useAudioPlayer(opts: UseAudioPlayerOptions) {
       void fadeVolume(targetVolumeRef.current, 240)
       return
     }
+    // 已播到结尾（ended）时 play() 不会自动从头开始，会立刻再次触发 ended；
+    // 重播前先把进度归零，保证单曲循环/手动重播可靠。
+    if (audio.ended) {
+      try { audio.currentTime = 0 } catch { /* 个别浏览器在 readyState=0 时设 currentTime 会抛，忽略 */ }
+    }
     console.log('[diag] audio play, readyState=', audio.readyState)
     try {
       audio.volume = 0

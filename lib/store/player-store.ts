@@ -301,7 +301,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   },
 
   handleTrackEnd: () => {
-    // 插播队列优先于一切模式：随机不跳过、单曲循环被打断、顺序播到队尾也不提前停止
+    // 插播队列优先于一切模式：随机/顺序不跳过、单曲循环被循环逻辑打断（见 loop 分支）
     if (get().playNextQueue.length > 0) {
       get().playFromPlayNext(0)
       return
@@ -309,15 +309,21 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
     const { playbackMode, queue, currentIndex } = get()
     if (queue.length === 0) return
     if (playbackMode === 'loop') {
-      // 单曲循环：回到开头重新播放（onEnd 已将 isPlaying 置 false，此处 true 触发播放）
-      set({ currentTime: 0, seekTarget: 0, seekNonce: get().seekNonce + 1, isPlaying: true })
+      // 单曲循环：回到开头重新播放。
+      // 关键修复：播放中 isPlaying 本就是 true，onEnd 只会先把它置回 false；
+      // 若此处直接 set isPlaying:true，值与上一渲染相同，PlayerBar 监听 isPlaying 的
+      // effect 不会重新触发 → 引擎收不到 play() → 「播完一首就停在开头」。
+      // 故先同步置 false（让 effect 走一次 pause 分支，对已 ended 的音频无副作用），
+      // 再用微任务置回 true，强制 isPlaying 经历 false→true 过渡以触发引擎 play()；
+      // 同时把进度 seek 回 0。
+      set({ currentTime: 0, seekTarget: 0, seekNonce: get().seekNonce + 1, isPlaying: false })
+      queueMicrotask(() => {
+        set({ isPlaying: true })
+      })
       return
     }
-    if (playbackMode === 'sequence' && currentIndex >= queue.length - 1) {
-      // 顺序播放到末尾：停止
-      set({ isPlaying: false, currentTime: 0 })
-      return
-    }
+    // 顺序播放 / 随机：播完当前曲统一走 next()；
+    // 顺序播放到末尾由 next() 的 (currentIndex+1)%length 回绕到第一首（整列循环），不再停止。
     get().next()
   },
 

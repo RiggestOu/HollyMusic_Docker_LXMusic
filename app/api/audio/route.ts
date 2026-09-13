@@ -104,7 +104,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       const mi = await resolveMusicInfoById(uidParam)
       if (mi) {
         // 高音质优先；文件名与落盘时由同一函数生成，可直接反推判定
-        for (const q of ['flac24bit', 'flac', '320k', '128k']) {
+        for (const q of ['flac24bit', 'flac', '320k', '128k'] as const) {
           const name = sanitizeFilename(buildFilenameFromMusicInfo(mi, q))
           const st = await fsMod
             .stat(pathMod.join(MUSIC_DIR, name))

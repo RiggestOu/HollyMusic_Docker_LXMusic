@@ -1,6 +1,6 @@
 [package]
 name = "hollymusic-desktop"
-version = "0.1.0"
+version = "0.0.1"
 description = "HollyMusic 桌面客户端（Windows 桌面壁纸 + 桌面歌词外壳）"
 authors = ["HollyMusic"]
 edition = "2021"

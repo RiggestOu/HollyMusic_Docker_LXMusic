@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { PlaylistSummary } from '@/lib/api/playlists'
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { MoreHorizontal, Pencil, Trash2, Download } from 'lucide-react'
 import { PlaylistCover } from './PlaylistCover'
 
 interface Props {
@@ -10,9 +10,11 @@ interface Props {
   currentUsername: string | null
   onEdit: (playlist: PlaylistSummary) => void
   onDelete: (playlist: PlaylistSummary) => void
+  /** 下载该歌单的全部歌曲（未下载的才会落盘） */
+  onDownload?: (playlist: PlaylistSummary) => void
 }
 
-export function PlaylistGrid({ playlists, currentUsername, onEdit, onDelete }: Props) {
+export function PlaylistGrid({ playlists, currentUsername, onEdit, onDelete, onDownload }: Props) {
   const [openMenuId, setOpenMenuId] = useState<number | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -34,7 +36,16 @@ export function PlaylistGrid({ playlists, currentUsername, onEdit, onDelete }: P
   return (
     <div ref={gridRef} className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
       {playlists.map(playlist => (
-        <div key={playlist.id} className="group relative rounded-lg p-2 hover:bg-accent/40">
+        <div
+          key={playlist.id}
+          className="group relative rounded-lg p-2 hover:bg-accent/40"
+          // 右键直接呼出操作菜单（与 ⋯ 按钮同一个菜单）
+          onContextMenu={e => {
+            if (playlist.username !== currentUsername) return
+            e.preventDefault()
+            setOpenMenuId(playlist.id)
+          }}
+        >
           <Link to={`/playlists/${playlist.id}`} className="flex flex-col gap-2">
             <PlaylistCover
               coverArt={playlist.coverArt}
@@ -58,7 +69,17 @@ export function PlaylistGrid({ playlists, currentUsername, onEdit, onDelete }: P
               </button>
 
               {openMenuId === playlist.id && (
-                <div className="absolute bottom-9 right-2 z-10 w-28 rounded-md border border-border bg-popover p-1 shadow-lg">
+                <div className="absolute bottom-9 right-2 z-10 w-32 rounded-md border border-border bg-popover p-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenMenuId(null)
+                      onDownload?.(playlist)
+                    }}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  >
+                    <Download className="h-3.5 w-3.5" /> 下载歌单歌曲
+                  </button>
                   <button
                     type="button"
                     onClick={() => {

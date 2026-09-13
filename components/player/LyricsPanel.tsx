@@ -2,6 +2,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePlayerStore } from '@/lib/store/player-store'
 import { useFavoritesStore } from '@/lib/store/favorites-store'
+import { useDownload } from '@/hooks/useDownload'
+import {
+  PRESETS,
+  PRESET_CHANGED_EVENT,
+  clampPreset,
+  loadStoredPreset,
+  storePreset,
+} from '@/lib/client/particle/presets'
+import { loadStoredCustomImage } from '@/lib/client/particle/custom-image'
+import { buildCoverUrl } from '@/lib/api/music'
+import { Sparkles } from 'lucide-react'
+import { pickHighestQuality } from '@/hooks/useDownloadQueue'
 import { useLyrics } from '@/hooks/useLyrics'
 import { isMobileLike } from '@/lib/utils/device'
 import { CoverImage } from '@/components/shared/CoverImage'
@@ -9,7 +21,6 @@ import { AudioSpectrum } from './AudioSpectrum'
 import { ParticleScene } from './ParticleScene'
 import type { LucideIcon } from 'lucide-react'
 import {
-  ChevronDown,
   Play,
   Pause,
   SkipBack,
@@ -22,6 +33,7 @@ import {
   Repeat1,
   Shuffle,
   Heart,
+  Download,
   X,
 } from 'lucide-react'
 
@@ -80,6 +92,53 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
   const cyclePlaybackMode = usePlayerStore(s => s.cyclePlaybackMode)
   const isFav = useFavoritesStore(s => (track ? s.ids.has(track.uid) : false))
   const toggleFavorite = useFavoritesStore(s => s.toggle)
+  // 下载：复用既有 useDownload（同步构造 /api/download?uid=... → 原生下载管理器），
+  // quality 省略时后端默认 320k
+  const { download, downloading } = useDownload()
+
+  // 13 种视觉预设（与粒子设置卡共用同一份数据源与持久化）
+  const [preset, setPreset] = useState(() => loadStoredPreset())
+  const [presetOpen, setPresetOpen] = useState(false)
+  const applyPreset = (index: number) => {
+    const next = clampPreset(index)
+    setPreset(next)
+    storePreset(next)
+    window.dispatchEvent(new Event(PRESET_CHANGED_EVENT))
+  }
+
+  // 进度条拖拽：拖动中只更新预览，松手才真正 seek（避免拖动过程疯狂 seek）
+  const [dragRatio, setDragRatio] = useState<number | null>(null)
+  const progressBarRef = useRef<HTMLDivElement>(null)
+
+  const ratioFromClientX = (clientX: number) => {
+    const el = progressBarRef.current
+    if (!el) return 0
+    const rect = el.getBoundingClientRect()
+    if (rect.width <= 0) return 0
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+  }
+
+  const onProgressPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return // 仅鼠标左键 / 触摸主指针
+    if (!duration || duration <= 0) return
+    e.preventDefault()
+    setDragRatio(ratioFromClientX(e.clientX))
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+
+  const onProgressPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRatio === null) return
+    setDragRatio(ratioFromClientX(e.clientX))
+  }
+
+  const onProgressPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRatio === null) return
+    const ratio = ratioFromClientX(e.clientX)
+    if (duration > 0) seek(duration * ratio)
+    setDragRatio(null)
+    e.currentTarget.releasePointerCapture?.(e.pointerId)
+  }
+
   // 右侧播放列表抽屉
   const queue = usePlayerStore(s => s.queue)
   const currentIndex = usePlayerStore(s => s.currentIndex)
@@ -155,28 +214,10 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
         @keyframes hm-lyric-sway { from { transform: rotateX(36deg) rotateY(-7deg); } to { transform: rotateX(36deg) rotateY(7deg); } }
       `}</style>
 
-      {/* 顶部：左=收起箭头；右=歌词显示模式切换（循环 平铺→贴合粒子→单行） */}
-      <div className="safe-area-top flex h-14 shrink-0 items-center justify-between px-2">
-        <button
-          onClick={() => setLyricsOpen(false)}
-          className="touch-target flex items-center justify-center rounded-full text-muted-foreground transition hover:bg-accent hover:text-foreground"
-          aria-label="收起歌词"
-        >
-          <ChevronDown className="h-6 w-6" />
-        </button>
-        <button
-          onClick={cycleMode}
-          className="touch-target mr-1 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
-          title={`歌词显示：${MODE_META[mode].label}（点击切换）`}
-          aria-label={`歌词显示模式：${MODE_META[mode].label}，点击切换`}
-        >
-          {(() => {
-            const Icon = MODE_META[mode].icon
-            return <Icon className="h-4 w-4" />
-          })()}
-          <span>{MODE_META[mode].label}</span>
-        </button>
-      </div>
+      {/* 顶部整条 UI 已按需求下线：
+          · 左上角收起箭头 —— 底部的歌曲封面本身就是「点封面返回」，出口未丢；
+          · 右上角歌词显示方式 —— 已挪到底部控制条、收藏按钮右侧。
+          键盘用户仍可用 Esc 关闭（见上方 keydown 监听）。 */}
 
       {/* 中部：3D 粒子背景 + 歌词叠加（粒子铺满此区域，WebGPU 优先、自动降级 WebGL2；
           初始化失败时静默退化为纯深色背景，不影响歌词功能）。
@@ -185,11 +226,49 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
         <ParticleScene
           audio={audio}
           isPlaying={isPlaying}
+          preset={preset}
+          coverUrl={
+            loadStoredCustomImage() ??
+            (track ? buildCoverUrl(track.uid, track.musicInfo.img) : null)
+          }
           grid={120}
           fps={60}
           pointSize={0.9}
           className="absolute inset-0"
         />
+
+        {/* 13 种视觉预设切换（与粒子设置卡同一份数据源） */}
+        <div className="absolute right-3 top-3 z-10">
+          <button
+            onClick={() => setPresetOpen(v => !v)}
+            className="touch-target flex items-center gap-1.5 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-xs text-white/70 backdrop-blur transition hover:text-white"
+            title="切换视觉预设"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {PRESETS[preset]?.label ?? '预设'} {preset + 1}/{PRESETS.length}
+          </button>
+          {presetOpen && (
+            <div className="absolute right-0 top-10 w-56 rounded-xl border border-white/10 bg-black/70 p-2 shadow-lg backdrop-blur">
+              <div className="grid max-h-52 grid-cols-2 gap-1 overflow-y-auto">
+                {PRESETS.map(item => (
+                  <button
+                    key={item.key}
+                    onClick={() => applyPreset(item.id)}
+                    title={item.hint}
+                    aria-pressed={preset === item.id}
+                    className={`rounded-md px-1.5 py-1 text-left text-[11px] leading-tight transition ${
+                      preset === item.id
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-white/60 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* ── 模式 1：平铺视窗（默认）── */}
         {mode === 'tile' && (
@@ -267,19 +346,9 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           </div>
         )}
 
-        {/* ── 模式 3：单行悬浮（频谱 canvas 上方）──
-            底部播放条正上方单行大字，随播放逐行淡入上滑切换 */}
-        {mode === 'single' && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-4 px-6 text-center">
-            <div
-              key={activeIndex}
-              style={{ animation: 'hm-lyric-line-in .35s ease-out both' }}
-              className="truncate text-2xl font-bold text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]"
-            >
-              {activeLine ? activeLine.text : track.name}
-            </div>
-          </div>
-        )}
+        {/* ── 模式 3：单行悬浮 ──
+            按需求改为「压在音量律动条之上」而不是悬在它上方，
+            因此实际渲染位置搬到了底部播放条的第一行（见下方 overlay）。 */}
 
         {/* ── 右侧当前播放列表抽屉 ──
             桌面（键鼠）：鼠标移到右缘自动滑出、离开抽屉区域自动收回（纯 hover，无遮罩，
@@ -389,22 +458,54 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
             isPlaying={isPlaying}
             className="h-7 min-w-0 flex-1 xl:absolute xl:left-1/2 xl:w-[min(48vw,52rem)] xl:-translate-x-1/2"
           />
+          {/* 单行歌词：按需求压在音量律动条之上（而非悬在它上方）。
+             绝对定位覆盖整行中央，z-10 保证在频谱之上；强投影保证压着频谱也读得清。
+              左右留内边距，让文字集中在频谱所在的中央区域，不与封面/歌手名抢位。 */}
+          {mode === 'single' && (
+            <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 px-14 text-center sm:px-24">
+              <div
+                key={activeIndex}
+                style={{ animation: 'hm-lyric-line-in .35s ease-out both' }}
+                className="truncate text-lg font-bold text-white [text-shadow:0_2px_10px_rgba(0,0,0,0.85)] sm:text-xl"
+              >
+                {activeLine ? activeLine.text : track.name}
+              </div>
+            </div>
+          )}
         </div>
         {/* 进度条（细线）+ 时间 */}
         <div className="mb-2 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
           <span className="w-9 text-right">
-            {buffering ? `${bufferProgress}%` : formatTimeShort(currentTime)}
+            {buffering
+              ? `${bufferProgress}%`
+              : formatTimeShort(dragRatio !== null ? duration * dragRatio : currentTime)}
           </span>
-          <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-muted">
+          <div
+              ref={progressBarRef}
+              onPointerDown={onProgressPointerDown}
+              onPointerMove={onProgressPointerMove}
+              onPointerUp={onProgressPointerUp}
+              onPointerCancel={onProgressPointerUp}
+              role="slider"
+              aria-label="播放进度"
+              aria-valuemin={0}
+              aria-valuemax={Math.max(0, Math.round(duration))}
+              aria-valuenow={Math.round(dragRatio !== null ? duration * dragRatio : currentTime)}
+              className="relative h-1 flex-1 cursor-pointer touch-none overflow-hidden rounded-full bg-muted after:absolute after:inset-x-0 after:-top-2 after:-bottom-2 after:content-['']"
+            >
             <div
-              className="absolute inset-y-0 left-0 rounded-full bg-primary transition-[width] duration-200"
+              className={`absolute inset-y-0 left-0 rounded-full bg-primary ${
+                dragRatio === null ? "transition-[width] duration-200" : ""
+              }`}
               style={{
                 width: `${
-                  buffering
-                    ? bufferProgress
-                    : duration > 0
-                      ? (currentTime / duration) * 100
-                      : 0
+                  dragRatio !== null
+                    ? dragRatio * 100
+                    : buffering
+                      ? bufferProgress
+                      : duration > 0
+                        ? (currentTime / duration) * 100
+                        : 0
                 }%`,
               }}
             />
@@ -413,8 +514,28 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
             {buffering ? '加载' : formatTimeShort(duration)}
           </span>
         </div>
-        {/* 控制按钮：左=循环模式，中=上一首/播放/下一首，右=收藏（与主播放条同步同款） */}
-        <div className="flex items-center justify-between">
+        {/* 控制按钮：循环模式 / 上一首 / 播放 / 下一首 / 收藏 —— 全部居中收拢成一组。
+            原先用 justify-between 会把循环与收藏顶到屏幕两侧，操作时手指要来回跨屏；
+            改成居中 + 与中键组一致的 6 号间距，五个按钮形成均匀的一簇。 */}
+        <div className="flex items-center justify-center gap-6">
+          {/* 下载当前歌曲：保存到 NAS 服务端的 /app/prisma/prisma/data/music */}
+          <button
+            onClick={() =>
+              download({
+                uid: track.uid,
+                quality: pickHighestQuality(
+                  (track.musicInfo as { types?: unknown } | undefined)?.types
+                ),
+              })
+            }
+            disabled={downloading}
+            className="touch-target flex items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground disabled:opacity-60"
+            aria-label={downloading ? '下载中' : '下载歌曲'}
+            title={downloading ? '下载中…' : '下载歌曲'}
+          >
+            <Download className="h-5 w-5" />
+          </button>
+
           <button
             onClick={cyclePlaybackMode}
             className={`touch-target flex items-center justify-center rounded-full transition hover:text-foreground ${
@@ -482,6 +603,19 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
             title={isFav ? '取消收藏' : '收藏'}
           >
             <Heart className={`h-5 w-5 ${isFav ? 'fill-current' : ''}`} />
+          </button>
+          {/* 歌词显示方式（平铺 → 贴合粒子 → 单行）：按需求从顶栏挪到收藏按钮右侧 */}
+          <button
+            onClick={cycleMode}
+            className="touch-target flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            title={`歌词显示：${MODE_META[mode].label}（点击切换）`}
+            aria-label={`歌词显示模式：${MODE_META[mode].label}，点击切换`}
+          >
+            {(() => {
+              const Icon = MODE_META[mode].icon
+              return <Icon className="h-4 w-4" />
+            })()}
+            <span>{MODE_META[mode].label}</span>
           </button>
         </div>
       </div>

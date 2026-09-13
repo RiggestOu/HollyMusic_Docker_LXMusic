@@ -28,7 +28,11 @@
  *   - 未播放过 → 边下边落盘，下次再下即命中
  *   - 多用户共享缓存
  *
- * 鉴权：受 requireUser 保护，未登录返回 401（attachment 响应不触发，浏览器会显示 JSON）。
+ * 鉴权：受 requireUser 保护，未登录返回 401。
+ *
+ * 【2026-09-13 变更】下载目标改为 **NAS 服务端落盘**（POST /api/download-to-nas），
+ * 不再是浏览器下载。落盘目录默认 /app/prisma/prisma/data/music，
+ * 可用环境变量 MUSIC_DOWNLOAD_DIR 覆盖。该接口不写数据库，仅读取 MusicInfo。
  */
 
 import { useState, useCallback } from 'react'
@@ -76,28 +80,41 @@ export function useDownload() {
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const download = useCallback(({ uid, quality = '320k' }: DownloadArgs) => {
+  /**
+   * 下载 = 保存到 NAS 服务端目录（默认 /app/prisma/prisma/data/music）。
+   *
+   * 不再用 window.location.href 交给浏览器下载管理器 —— 那只会把文件落到用户自己的电脑。
+   * 这里改为 POST /api/download-to-nas：服务端取流落盘，浏览器只收一个 JSON 结果。
+   * 因为不再依赖「页面导航」，也就不存在 transient user activation 的顾虑。
+   */
+  const download = useCallback(async ({ uid, quality = '320k' }: DownloadArgs) => {
     setDownloading(true)
     setError(null)
     try {
-      // 同步构造下载 URL：只传 uid + quality，文件名后端组装
-      const downloadUrl =
-        `/api/download?uid=${encodeURIComponent(uid)}` +
-        `&quality=${encodeURIComponent(quality)}`
-
-      // window.location.href 触发浏览器原生下载管理器：
-      // - 不依赖 transient user activation（页面导航无此限制）
-      // - 浏览器收到 Content-Disposition: attachment 后自动下载，当前页面不跳转
-      // - 下载进度/速度/续传由浏览器下载管理器提供，前端不再模拟
-      window.location.href = downloadUrl
+      const res = await fetch('/api/download-to-nas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid, quality }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        filename?: string
+        size?: number
+        error?: string
+      }
+      if (!res.ok || !data.ok) {
+        const msg = data.error || mapDownloadError(res.status)
+        setError(msg)
+        toast.error(msg)
+        return
+      }
+      toast.success(`已保存到 NAS：${data.filename ?? '完成'}`)
     } catch (e) {
-      // 此处几乎不可能抛错（纯字符串拼接），兜底
       const msg = e instanceof Error ? e.message : '下载失败'
       setError(msg)
       toast.error(msg)
     } finally {
-      // 延迟重置 downloading，给浏览器时间发起导航请求
-      setTimeout(() => setDownloading(false), 1500)
+      setDownloading(false)
     }
   }, [])
 

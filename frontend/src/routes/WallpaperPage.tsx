@@ -12,6 +12,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { ParticleScene } from '@/components/player/ParticleScene'
+import { loadStoredPreset, subscribePresetChange } from '@/lib/client/particle/presets'
+import {
+  loadStoredCustomImage,
+  subscribeCustomImage,
+} from '@/lib/client/particle/custom-image'
 import {
   desktopOn,
   fetchDesktopConfig,
@@ -27,6 +32,11 @@ export function WallpaperPage() {
   const [config, setConfig] = useState<DesktopConfig | null>(null)
   const [paused, setPaused] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 视觉预设与主窗口共享：两窗口同源，共用一份 localStorage，
+  // 因此主窗口切换预设时壁纸窗口能立即跟随（storage 事件 + 同页自定义事件）
+  const [preset, setPreset] = useState(() => loadStoredPreset())
+  // 自定义封面图片（与主窗口共享，上传/恢复后立即跟随）
+  const [customImageUrl, setCustomImageUrl] = useState(() => loadStoredCustomImage())
 
   useEffect(() => {
     const stops = [
@@ -43,6 +53,8 @@ export function WallpaperPage() {
       desktopOn<{ paused?: boolean } | null>('pause', detail => {
         setPaused(Boolean(detail?.paused))
       }),
+      subscribePresetChange(setPreset),
+      subscribeCustomImage(setCustomImageUrl),
     ]
     void fetchDesktopConfig().then(c => {
       if (c) setConfig(c)
@@ -60,6 +72,8 @@ export function WallpaperPage() {
         pointSize={config?.pointSize ?? 1}
         paused={paused}
         preference={(config?.backend ?? 'auto') as BackendPreference}
+        preset={preset}
+        coverUrl={customImageUrl}
         onError={setError}
       />
       {error ? (

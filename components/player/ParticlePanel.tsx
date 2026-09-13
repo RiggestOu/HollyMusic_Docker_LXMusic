@@ -15,6 +15,23 @@ import { useCallback, useEffect, useState } from 'react'
 import { X, Sparkles } from 'lucide-react'
 import { ParticleScene } from './ParticleScene'
 import type { BackendKind } from '@/lib/client/particle/types'
+import {
+  PRESETS,
+  PRESET_CHANGED_EVENT,
+  clampPreset,
+  loadStoredPreset,
+  storePreset,
+} from '@/lib/client/particle/presets'
+import {
+  loadAiDepthEnabled,
+  setAiDepthEnabled,
+} from '@/lib/client/particle/cover-depth-ai'
+import { useRef } from 'react'
+import {
+  loadStoredCustomImage,
+  storeCustomImage,
+} from '@/lib/client/particle/custom-image'
+import { buildCoverUrl } from '@/lib/api/music'
 import { usePlayerStore } from '@/lib/store/player-store'
 
 interface ParticlePanelProps {
@@ -42,14 +59,69 @@ export function ParticlePanel({ audio }: ParticlePanelProps) {
   const volume = usePlayerStore(s => s.volume)
   const setVolume = usePlayerStore(s => s.setVolume)
   const isPlaying = usePlayerStore(s => s.isPlaying)
+  const currentTrack = usePlayerStore(s => s.currentTrack)
 
   const [size, setSize] = useState(1)
   const [density, setDensity] = useState(160)
   const [fps, setFps] = useState(60)
+  const [preset, setPreset] = useState(() => loadStoredPreset())
+  const [aiDepth, setAiDepth] = useState(() => loadAiDepthEnabled())
+  // 自定义图片（第 5 项）：设置后优先生效，清空后回到当前曲目封面
+  const [customImageUrl, setCustomImageUrl] = useState<string | null>(
+    () => loadStoredCustomImage()
+  )
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [backend, setBackend] = useState<BackendKind | null>(null)
   const [error, setError] = useState<string | null>(null)
   /** 当前被滚轮操作的菜单项（鼠标悬停切换）。 */
   const [focused, setFocused] = useState<MenuKey>('size')
+
+  /** 当前曲目封面 URL（cacheKey 用 musicInfo.img，音源换图时缓存键随之变化）。 */
+  const coverUrl =
+    customImageUrl ??
+    (currentTrack ? buildCoverUrl(currentTrack.uid, currentTrack.musicInfo.img) : null)
+
+  /**
+   * 切换预设：更新状态 + 落盘 + 广播。
+   * 落盘是为了让桌面壁纸窗口也能记住同一预设（两个窗口同源，共享 localStorage）；
+   * 广播用于同页即时通知。
+   */
+  /** 上传自定义图片 → 服务端落盘 → 作为粒子封面使用。 */
+  const handleCustomImage = useCallback(async (file: File) => {
+    setUploading(true)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('读取文件失败'))
+        reader.readAsDataURL(file)
+      })
+      const res = await fetch('/api/particle-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
+      if (!res.ok || !data.url) throw new Error(data.error || `HTTP ${res.status}`)
+      setCustomImageUrl(data.url)
+      storeCustomImage(data.url)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '上传失败'
+      setError(msg)
+    } finally {
+      setUploading(false)
+    }
+  }, [])
+
+  const applyPreset = useCallback((index: number) => {
+    const next = clampPreset(index)
+    setPreset(next)
+    storePreset(next)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(PRESET_CHANGED_EVENT))
+    }
+  }, [])
 
   // Esc 关闭（与 LyricsPanel 一致的键盘退出路径）
   useEffect(() => {
@@ -117,6 +189,8 @@ export function ParticlePanel({ audio }: ParticlePanelProps) {
         <ParticleScene
           audio={audio}
           isPlaying={isPlaying}
+          coverUrl={coverUrl}
+          preset={preset}
           grid={density}
           fps={fps}
           pointSize={size}
@@ -134,6 +208,81 @@ export function ParticlePanel({ audio }: ParticlePanelProps) {
 
         {/* 参数菜单：滚轮作用于当前悬停项 */}
         <div className="safe-area-bottom absolute right-3 top-3 w-56 rounded-xl border border-border bg-card/85 p-3 shadow-lg backdrop-blur">
+          <div className="mb-2 flex items-center justify-between text-xs font-medium text-muted-foreground">
+            <span>视觉预设</span>
+            <span className="tabular-nums text-[10px] opacity-70">
+              {preset + 1}/{PRESETS.length}
+            </span>
+          </div>
+          <div className="mb-3 grid max-h-52 grid-cols-2 gap-1 overflow-y-auto pr-0.5">
+            {PRESETS.map(item => (
+              <button
+                key={item.key}
+                onClick={() => applyPreset(item.id)}
+                title={item.hint}
+                aria-pressed={preset === item.id}
+                className={`rounded-md px-1.5 py-1 text-left text-[11px] leading-tight transition ${
+                  preset === item.id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {/* 第 5 项：上传自定义图片作为粒子封面 */}
+          <div className="mb-3 rounded-lg bg-background/60 p-2">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[11px] text-muted-foreground">自定义封面图片</span>
+              {customImageUrl ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomImageUrl(null)
+                    storeCustomImage(null)
+                  }}
+                  className="text-[11px] text-primary hover:underline"
+                >
+                  恢复封面
+                </button>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full rounded-md border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-60"
+            >
+              {uploading ? '上传中…' : '选择图片上传到服务端'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f) void handleCustomImage(f)
+              }}
+            />
+          </div>
+          <label className="mb-3 flex cursor-pointer items-start gap-2 rounded-lg bg-background/60 px-2 py-1.5">
+            <input
+              type="checkbox"
+              checked={aiDepth}
+              onChange={e => {
+                setAiDepth(e.target.checked)
+                setAiDepthEnabled(e.target.checked)
+              }}
+              className="mt-0.5"
+            />
+            <span className="text-[11px] leading-tight text-muted-foreground">
+              AI 深度增强
+              <span className="block opacity-70">首次使用需从 CDN 下载约 50MB 模型，失败自动回退</span>
+            </span>
+          </label>
           <div className="mb-2 text-xs font-medium text-muted-foreground">
             滚轮调节（悬停选择）
           </div>

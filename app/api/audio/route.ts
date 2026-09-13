@@ -84,6 +84,48 @@ async function handleAudio(request: NextRequest, isHead: boolean): Promise<Respo
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
+  // LOCAL_FIRST_MARKER —— 已下载的歌优先播放 NAS 本地文件
+  try {
+    const { searchParams } = new URL(request.url)
+    const uidParam = searchParams.get('uid')
+    if (uidParam) {
+      const fsMod = await import('node:fs/promises')
+      const pathMod = await import('node:path')
+      const { resolveMusicInfoById } = await import('@/lib/db')
+      const {
+        sanitizeFilename,
+        buildFilenameFromMusicInfo,
+      } = await import('@/lib/server/download-utils')
+
+      const MUSIC_DIR =
+        process.env.MUSIC_DOWNLOAD_DIR || '/app/prisma/prisma/data/music'
+
+      // 只读查询，不写数据库
+      const mi = await resolveMusicInfoById(uidParam)
+      if (mi) {
+        // 高音质优先；文件名与落盘时由同一函数生成，可直接反推判定
+        for (const q of ['flac24bit', 'flac', '320k', '128k']) {
+          const name = sanitizeFilename(buildFilenameFromMusicInfo(mi, q))
+          const st = await fsMod
+            .stat(pathMod.join(MUSIC_DIR, name))
+            .catch(() => null)
+          if (st && st.isFile() && st.size > 0) {
+            // 302 到已支持 Range 的本地播放接口；未命中则继续走原有在线逻辑
+            return new Response(null, {
+              status: 302,
+              headers: {
+                Location:
+                  '/api/local-music/play?name=' + encodeURIComponent(name),
+              },
+            })
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // 本地判定失败不阻塞在线播放
+  }
+
   return handleAudio(request, false)
 }
 

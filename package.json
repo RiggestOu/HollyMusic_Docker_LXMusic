@@ -3,7 +3,7 @@
   "version": "0.25.0",
   "private": true,
   "description": "多源在线音乐聚合播放器 · 自部署 · PWA · 移动端友好",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "author": "redcath <30196697+redcatH@users.noreply.github.com>",
   "homepage": "https://github.com/redcatH/HollyMusic",
   "repository": {

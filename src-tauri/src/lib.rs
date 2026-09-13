@@ -24,6 +24,14 @@ pub fn current_config(app: &AppHandle) -> AppConfig {
 
 pub fn run() {
     tauri::Builder::default()
+        // 单实例：第二个实例启动时会走这个回调，把已有主窗口提到前台
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(AppState::load())
         .invoke_handler(tauri::generate_handler![
             ipc::get_config,

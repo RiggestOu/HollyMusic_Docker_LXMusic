@@ -2,10 +2,19 @@
  * ParticleScene —— 粒子可视化 React 组件（后端无关）。
  *
  * 职责划分：
- *   · 本组件：音频分析、镜头控制（Maya / 多指手势）、渲染循环、生命周期
+ *   · 本组件：音频分析、节拍追踪、形态缓动、封面加载、镜头控制（Maya / 多指手势）、
+ *     渲染循环、生命周期
  *   · 渲染后端：由 lib/client/particle 的工厂按 WebGPU → WebGL 2.0 顺序创建
  *
- * 两条后端共用同一份音频特征与镜头状态，因此交互与观感完全一致。
+ * 两条后端共用同一份音频特征、涟漪数据与镜头状态，因此交互与观感完全一致。
+ *
+ * # 粒子形态
+ * 每个粒子有两个归宿形态，由 `coverMix` 平滑插值：
+ *   · 封面形态：粒子铺成一块平面、按 UV 采样专辑封面 → 拼出可辨认的专辑图，
+ *     Z 轴由音频驱动呼吸/浮雕，节拍时径向爆散再平滑回落；
+ *   · 星云形态：球面随机分布 + 噪声流场漂移。
+ * 没有封面（或 `morphMode='nebula'`）时自动停留在星云形态；切歌载入新封面时
+ * `coverMix` 先归零再升到 1，于是每次都有一段「散开 → 重新聚成新封面」的过渡。
  *
  * 音频数据源复用项目既有分析管线（lib/client/audio-analysis）：
  * createMediaElementSource 对同一元素只能调用一次，且 iOS 必须整体禁用接管
@@ -15,7 +24,7 @@
  *   · 拿不到 → spectrumSynth() 合成频谱兜底（iOS / 接管失败）
  *
  * 许可证：本文件为独立实现，仅参考 Mineradio 的视觉架构
- * （点阵粒子 + 音频 uniform 驱动），未复制其 GPL-3.0 源码，不引入 copyleft 传染。
+ * （点阵粒子采样封面 + 音频 uniform 驱动），未复制其 GPL-3.0 源码，不引入 copyleft 传染。
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -31,6 +40,10 @@ import {
   type BackendPreference,
 } from '@/lib/client/particle'
 import type { BackendKind, ParticleRenderer } from '@/lib/client/particle/types'
+import { createBeatTracker, type BandFeature } from '@/lib/client/particle/beat'
+import { loadCoverTexture, type CoverTexture } from '@/lib/client/particle/cover-texture'
+import { enhanceCoverDepth } from '@/lib/client/particle/cover-depth-ai'
+import { loadSkullPointCloud, resampleSkull } from '@/lib/client/particle/skull-points'
 import { isMobileLike, suggestedGrid } from '@/lib/utils/device'
 
 export interface ParticleSceneProps {
@@ -39,6 +52,13 @@ export interface ParticleSceneProps {
   isPlaying?: boolean
   /** 远程模式：外部（如 Tauri IPC）注入的频谱，优先于本地分析。 */
   remoteSpectrum?: Uint8Array | null
+  /** 当前曲目的封面 URL（buildCoverUrl 生成）；为 null 时停留在星云形态。 */
+  coverUrl?: string | null
+  /**
+   * 粒子视觉预设索引（0..12，见 lib/client/particle/presets.ts）。
+   * 默认 0 = 专辑封面；该预设下若拿不到封面会自动退化为星云形态。
+   */
+  preset?: number
   /** 粒子网格基准边长（粒子数 = grid×grid）；移动端自动降级。 */
   grid?: number
   /** 帧率上限。 */
@@ -60,10 +80,66 @@ export interface ParticleSceneProps {
 
 type DragMode = 'none' | 'rotate' | 'pan' | 'dolly'
 
+/** 形态缓动速率（1/秒）：约 1.3s 完成 90%，留足「散开 → 重聚」的观感时间。 */
+const MORPH_RATE = 1.8
+
+/** 预设切换爆散的回落速率（1/秒）：约 0.6s 衰减到 1/10，够粒子飞出去再平滑落位。 */
+const PRESET_BURST_DECAY = 3.6
+
+/** 星河背景层粒子数（PC / 移动端）。移动端减半，避免背景层拖累低端 GPU。 */
+const STAR_COUNT_PC = 1400
+const STAR_COUNT_MOBILE = 700
+
+/**
+ * 把 Mineradio 的 φ 换算成本项目的 φ。
+ *
+ * 两边对 φ 的定义是**互余**的，直接照抄会把相机放到错误的位置：
+ *   · Mineradio：`y = r·sinφ`、XZ 半径 `= r·cosφ` → φ 是「自 XZ 平面抬起的仰角」；
+ *   · 本项目：  `y = r·cosφ`、XZ 半径 `= r·sinφ` → φ 是「自 +Y 轴量起的极角」。
+ * 因此 `本项目 φ = π/2 − Mineradio φ`。θ 的定义两边一致（自 +Z 轴转向 +X），无需换算。
+ */
+const toPolarPhi = (elevation: number) => Math.PI / 2 - elevation
+
+/**
+ * 相机基线：逐项对齐 Mineradio 的 `defaultOrbitStateForPreset`。
+ * φ≈0.08（仰角）即几乎正对 XY 平面 —— 封面、唱片这类平面预设必须正对才有意义。
+ * 索引与 lib/client/particle/presets.ts 的预设表一一对应。
+ */
+const PRESET_CAMERA: ReadonlyArray<{ theta: number; phi: number; radius: number }> = [
+  { theta: 0.0, phi: toPolarPhi(0.08), radius: 6.6 }, // 0 专辑封面
+  { theta: 0.0, phi: toPolarPhi(0.03), radius: 6.2 }, // 1 滚筒
+  { theta: 0.0, phi: toPolarPhi(0.15), radius: 7.0 }, // 2 星球
+  { theta: 0.0, phi: toPolarPhi(0.05), radius: 8.0 }, // 3 虚空
+  { theta: 0.0, phi: toPolarPhi(0.04), radius: 6.5 }, // 4 唱片
+  { theta: 0.0, phi: toPolarPhi(0.08), radius: 6.6 }, // 5 音域回响
+  { theta: 0.18, phi: toPolarPhi(0.1), radius: 7.4 }, // 6 骷髅点云
+  { theta: 0.0, phi: toPolarPhi(0.08), radius: 6.6 }, // 7 音域回响
+  { theta: 0.0, phi: toPolarPhi(0.08), radius: 6.6 }, // 8 音域回响
+  { theta: -0.08, phi: toPolarPhi(0.12), radius: 7.4 }, // 9 月蚀圣杯
+  { theta: 0.0, phi: toPolarPhi(0.02), radius: 7.15 }, // 10 雨幕霓虹
+  { theta: 0.1, phi: toPolarPhi(0.11), radius: 7.0 }, // 11 折光蝶群
+  { theta: -0.12, phi: toPolarPhi(0.18), radius: 7.35 }, // 12 深海绽放
+]
+
+/** Mineradio 对「切到预设 5」保持当前镜头；其余预设切过去会重置到基线。 */
+/** 骷髅点云预设（对应外部点云资源）。 */
+const SKULL_PRESET = 6
+
+const PRESET_KEEP_CAMERA = 5
+
+/** 相机限制：对齐 Mineradio 的 minPhi/maxPhi/minRadius/maxRadius（同样要换算 φ）。 */
+const PHI_ELEVATION_LIMIT = Math.PI * 0.45
+const PHI_MIN = Math.PI / 2 - PHI_ELEVATION_LIMIT
+const PHI_MAX = Math.PI / 2 + PHI_ELEVATION_LIMIT
+const RADIUS_MIN = 2.4
+const RADIUS_MAX = 14.0
+
 export function ParticleScene({
   audio = null,
   isPlaying = false,
   remoteSpectrum = null,
+  coverUrl = null,
+  preset = 0,
   grid = 160,
   fps = 60,
   pointSize = 1,
@@ -77,9 +153,20 @@ export function ParticleScene({
   const mountRef = useRef<HTMLDivElement>(null)
   const [backend, setBackend] = useState<BackendKind | null>(null)
 
+  /** 渲染器实例：主 effect 创建，封面 effect 复用（封面切换不重建整个场景）。 */
+  const rendererRef = useRef<ParticleRenderer | null>(null)
+  /** 封面 effect 早于渲染器就绪时，把结果暂存到这里，由主 effect 初始化后补上。 */
+  const pendingCoverRef = useRef<CoverTexture | null>(null)
+  /** 当前是否已装载真实封面（决定 auto 形态的目标值）。 */
+  const hasCoverRef = useRef(false)
+  /** 封面代次：每装载一张新封面 +1，渲染循环据此把 coverMix 归零重聚。 */
+  const coverEpochRef = useRef(0)
+  /** 骷髅点云是否已加载过（避免重复 fetch）。 */
+  const skullLoadedRef = useRef(false)
+
   /** 供事件回调与渲染循环读取的最新值，避免重建场景。 */
-  const liveRef = useRef({ isPlaying, paused, remoteSpectrum, onWheelMenu, fps })
-  liveRef.current = { isPlaying, paused, remoteSpectrum, onWheelMenu, fps }
+  const liveRef = useRef({ isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset })
+  liveRef.current = { isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset }
 
   useEffect(() => {
     const mount = mountRef.current
@@ -94,19 +181,22 @@ export function ParticleScene({
     const count = suggestedGrid(grid) * suggestedGrid(grid)
 
     // ---------- 镜头 rig（Maya 风格球坐标 + 平移目标） ----------
+    // 初始机位取当前预设的基线（对齐 Mineradio 的 applyPresetOrbitBaseline）
+    const initialCamera =
+      PRESET_CAMERA[Math.max(0, Math.min(PRESET_CAMERA.length - 1, Math.round(preset)))]
     const rig = {
-      radius: 15,
-      theta: 0.6,
-      phi: Math.PI / 2,
+      radius: initialCamera.radius,
+      theta: initialCamera.theta,
+      phi: initialCamera.phi,
       target: [0, 0, 0] as [number, number, number],
     }
 
     const rotateBy = (dx: number, dy: number) => {
       rig.theta -= dx * 0.0055
-      rig.phi = Math.min(Math.PI - 0.12, Math.max(0.12, rig.phi - dy * 0.0055))
+      rig.phi = Math.min(PHI_MAX, Math.max(PHI_MIN, rig.phi - dy * 0.0055))
     }
     const dollyBy = (dy: number) => {
-      rig.radius = Math.min(48, Math.max(3.2, rig.radius * (1 + dy * 0.0022)))
+      rig.radius = Math.min(RADIUS_MAX, Math.max(RADIUS_MIN, rig.radius * (1 + dy * 0.0022)))
     }
     /** 平移：用当前相机基向量，保证远近视觉速度一致。 */
     const panBy = (dx: number, dy: number, basis: (() => number[][]) | null) => {
@@ -132,14 +222,10 @@ export function ParticleScene({
       fx /= fl
       fy /= fl
       fz /= fl
-      // right = normalize(cross(forward, worldUp))
-      let rx = fz * 0 - fy * 0
+      // right = normalize(cross(forward, worldUp)) = normalize((fz, 0, -fx))
+      let rx = fz
       let ry = 0
-      let rz = 0
-      // cross(forward, (0,1,0)) = (fz*1 - fy*0, fx*0 - fz*0, fy*0 - fx*1) = (fz, 0, -fx)
-      rx = fz
-      ry = 0
-      rz = -fx
+      let rz = -fx
       const rl = Math.hypot(rx, ry, rz) || 1
       rx /= rl
       ry /= rl
@@ -192,15 +278,12 @@ export function ParticleScene({
       window.addEventListener('click', onGesture, { capture: true, passive: true })
     }
 
-    let bass = 0
-    let mid = 0
-    let treble = 0
-    let energy = 0
-    let beat = 0
-    let beatDecay = 0
-    let prevBass = 0
-
-    const analyse = (now: number) => {
+    /**
+     * 提取原始频段能量（0..1，未平滑）。
+     * 平滑、onset 检测、脉冲包络与涟漪全部交给 beat tracker —— 那里是 dt 归一化的，
+     * 而按帧平滑会让不同帧率下的律动强度产生差异（上一版的实际缺陷）。
+     */
+    const readBands = (now: number, dt: number): BandFeature => {
       const remote = liveRef.current.remoteSpectrum
       let data: Uint8Array
       if (remote && remote.length > 0) {
@@ -210,8 +293,10 @@ export function ParticleScene({
         data = freqData
       } else {
         spectrumSynth(synthTarget, now)
+        // 合成频谱自身带抖动，按 dt 归一化平滑一下，避免兜底路径看起来发毛
+        const k = 1 - Math.exp(-dt / 0.06)
         for (let i = 0; i < synthSmooth.length; i++) {
-          synthSmooth[i] += Math.round((synthTarget[i] - synthSmooth[i]) * 0.22)
+          synthSmooth[i] += Math.round((synthTarget[i] - synthSmooth[i]) * k)
         }
         data = synthSmooth
       }
@@ -229,21 +314,17 @@ export function ParticleScene({
       mi = mi / (midEnd - loEnd) / 255
       hi = hi / Math.max(1, n - midEnd) / 255
 
+      // 既无分析管线又未在播放时，让粒子完全静息（否则合成频谱会自嗨）
       const active = liveRef.current.isPlaying || !usingSynth ? 1 : 0
-      const k = 0.18
-      bass += (lo * active - bass) * k
-      mid += (mi * active - mid) * k
-      treble += (hi * active - treble) * k
-      energy += (((lo + mi + hi) / 3) * active - energy) * k
-
-      const rise = bass - prevBass
-      prevBass = bass
-      if (rise > 0.055) beatDecay = 1
-      beatDecay *= 0.9
-      beat += (beatDecay - beat) * 0.35
-
-      return { bass, mid, treble, energy, beat }
+      return {
+        bass: lo * active,
+        mid: mi * active,
+        treble: hi * active,
+        energy: ((lo + mi + hi) / 3) * active,
+      }
     }
+
+    const tracker = createBeatTracker()
 
     // ---------- 事件绑定（renderer 就绪后需要 canvas） ----------
     let canvas: HTMLElement | null = null
@@ -335,7 +416,12 @@ export function ParticleScene({
 
     // ---------- 初始化 ----------
     void createParticleRenderer(
-      { container: mount, count, pointSize },
+      {
+        container: mount,
+        count,
+        pointSize,
+        starCount: isMobile ? STAR_COUNT_MOBILE : STAR_COUNT_PC,
+      },
       preference,
       resolved => {
         setBackend(resolved)
@@ -348,6 +434,15 @@ export function ParticleScene({
           return
         }
         renderer = r
+        rendererRef.current = r
+        // 补下发初始预设：后端默认是 0，若用户记住的是别的预设，
+        // 只靠渲染循环里的「变化检测」会永远不生效（值从未变过）
+        r.setPreset(liveRef.current.preset)
+        // 封面 effect 可能先于渲染器完成，这里补上暂存结果
+        if (pendingCoverRef.current) {
+          r.setCover(pendingCoverRef.current)
+          hasCoverRef.current = true
+        }
         canvas = mount.querySelector('canvas')
         if (canvas) {
           if (!isMobile) {
@@ -371,7 +466,17 @@ export function ParticleScene({
         resize()
 
         let lastFrame = 0
+        let lastRenderedAt = performance.now()
         const start = performance.now()
+
+        // 缓动状态（每次重建场景重置；切歌时由 coverEpoch 触发归零重聚）
+        let coverMix = 0
+        let seenEpoch = coverEpochRef.current
+        // 预设切换爆散：切换那一帧拉满，之后按 dt 指数回落
+        let presetBurst = 0
+        // 记录已下发给后端的预设，避免每帧重复调用 setPreset
+        let appliedPreset = liveRef.current.preset
+
         const loop = (now: number) => {
           raf = requestAnimationFrame(loop)
           const interval = 1000 / Math.max(1, liveRef.current.fps)
@@ -379,18 +484,69 @@ export function ParticleScene({
           lastFrame = now
           if (liveRef.current.paused || document.hidden) return
 
-          const f = analyse(now)
+          // 与上一「实际渲染帧」的间隔：帧率上限与暂停都被自然计入，无需额外补偿
+          const dt = Math.min(0.05, Math.max(1 / 240, (now - lastRenderedAt) / 1000))
+          lastRenderedAt = now
+
+          const frame = tracker.update(dt, readBands(now, dt))
+
+          // ---- 预设切换：先爆散再落位（不是瞬移） ----
+          const nextPreset = liveRef.current.preset
+          if (nextPreset !== appliedPreset) {
+            appliedPreset = nextPreset
+            renderer?.setPreset(nextPreset)
+            presetBurst = 1
+            // 切预设时重置到该预设的机位基线（对齐 Mineradio 的 applyPresetOrbitBaseline）；
+            // 唯独预设 5 保持当前镜头，避免把用户手动调好的视角拉回去
+            // 预设 6（骷髅点云）：首次切到时异步加载外部点云并抽稀下发
+          if (nextPreset === SKULL_PRESET && !skullLoadedRef.current) {
+            skullLoadedRef.current = true
+            void loadSkullPointCloud().then(cloud => {
+              if (!cloud) return
+              const g = Math.max(1, Math.round(Math.sqrt(count)))
+              const sampled = resampleSkull(cloud, g * g)
+              if (sampled) rendererRef.current?.setSkullPoints(sampled.positions)
+            })
+          }
+
+          if (nextPreset !== PRESET_KEEP_CAMERA) {
+              const base =
+                PRESET_CAMERA[Math.max(0, Math.min(PRESET_CAMERA.length - 1, nextPreset))]
+              rig.radius = base.radius
+              rig.theta = base.theta
+              rig.phi = base.phi
+              rig.target[0] = 0
+              rig.target[1] = 0
+              rig.target[2] = 0
+            }
+          }
+          // 爆散强度按 dt 指数回落（与帧率解耦，120FPS 与 30FPS 观感一致）
+          presetBurst *= Math.exp(-dt * PRESET_BURST_DECAY)
+          renderer?.setPresetBurst(presetBurst)
+
+          // ---- 封面形态缓动：只有预设 0（专辑封面）使用，目标 0=星云 / 1=封面 ----
+          if (coverEpochRef.current !== seenEpoch) {
+            seenEpoch = coverEpochRef.current
+            coverMix = 0 // 新封面：先散开成星云，再重新聚拢成新的专辑图
+          }
+          const target = nextPreset < 0.5 && hasCoverRef.current ? 1 : 0
+          coverMix += (target - coverMix) * (1 - Math.exp(-dt * MORPH_RATE))
+          // smoothstep 缓动：起步与收尾都平缓，中途快，避免「线性拉伸」的机械感
+          const eased = coverMix * coverMix * (3 - 2 * coverMix)
+          renderer?.setCoverMix(eased)
+
           // 静息时极缓慢自转，避免画面完全静止
           if (mode === 'none' && touchMode === 'none') rig.theta += 0.00035
 
           renderer?.update(
             {
               time: (now - start) / 1000,
-              bass: f.bass,
-              mid: f.mid,
-              treble: f.treble,
-              energy: f.energy,
-              beat: f.beat,
+              bass: frame.bass,
+              mid: frame.mid,
+              treble: frame.treble,
+              energy: frame.energy,
+              pulse: frame.pulse,
+              ripples: frame.ripples,
             },
             { radius: rig.radius, theta: rig.theta, phi: rig.phi, target: rig.target },
           )
@@ -438,10 +594,55 @@ export function ParticleScene({
         window.removeEventListener('click', onGesture, { capture: true })
       }
       renderer?.dispose()
+      rendererRef.current = null
     }
-    // 场景只初始化一次；动态值通过 liveRef 读取
+    // 场景只初始化一次；动态值通过 liveRef 读取。
+    // coverUrl 刻意不在依赖里：换封面只需替换纹理，重建整个场景会打断播放动画。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audio, grid, preference])
+
+  // ---------- 封面加载（独立于场景生命周期） ----------
+  useEffect(() => {
+    if (!coverUrl) {
+      hasCoverRef.current = false
+      pendingCoverRef.current = null
+      rendererRef.current?.setCover(null)
+      return
+    }
+
+    const controller = new AbortController()
+    let cancelled = false
+
+    void loadCoverTexture(coverUrl, controller.signal).then(cover => {
+      if (cancelled) return
+      if (!cover || !cover.hasImage) {
+        // 取不到封面不是错误：粒子停在星云形态即可，不影响播放
+        hasCoverRef.current = false
+        pendingCoverRef.current = null
+        rendererRef.current?.setCover(null)
+        return
+      }
+      hasCoverRef.current = true
+      pendingCoverRef.current = cover
+      rendererRef.current?.setCover(cover)
+      // 可选 AI 深度增强：后台跑，成功则只替换 R 通道；失败静默沿用启发式深度
+      if (cover.edgeCanvas) {
+        void enhanceCoverDepth(cover.canvas, cover.edgeCanvas).then(upgraded => {
+          if (cancelled || !upgraded) return
+          const nextCover: CoverTexture = { ...cover, edgeCanvas: upgraded }
+          pendingCoverRef.current = nextCover
+          rendererRef.current?.setCover(nextCover)
+        })
+      }
+      // 代次 +1：渲染循环下一帧把 coverMix 归零，形成「散开 → 聚成新封面」的过渡
+      coverEpochRef.current += 1
+    })
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [coverUrl])
 
   return (
     <div

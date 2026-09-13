@@ -75,3 +75,44 @@ desktop.ini
 
 # ---------- 本地工作区（WorkBuddy 记忆等，仅本机）----------
 .workbuddy/
+
+# ----------------------------------------------------------------------------
+# 以下为 2026-09-13 补充：所有「不要打包进程序 / 不进仓库」的内容
+# 规则：只追加，不改动上面的既有规则（保留 !src-tauri/dist/，不写裸 cache/）
+# ----------------------------------------------------------------------------
+
+# ---------- 本地验证 / 临时脚本 ----------
+.tmp-visual/
+.tmp-smoke/
+.tmp-*
+# 下载到一半的临时文件（download-to-nas 的 .part）
+*.part
+
+# ---------- 部署与发布产物（本地生成，CI 会另外产出）----------
+docker-compose.override.yml
+docker-compose.local.yml
+*.tar
+hollymusic-*.zip
+hollymusic-*.exe
+hollymusic-*.msi
+*.local
+
+# ---------- 运行时产生的内容（上传 / 落盘的音乐）----------
+# 注意：public/assets/skull-decimation-points.bin 是**需要的资源**，不在此列
+uploads/
+public/uploads/
+public/music/
+music/
+
+# ---------- Windows / Visual Studio ----------
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ---------- 测试与覆盖率（补充）----------
+test-results/
+playwright-report/
+vitest.config.ts.timestamp-*
+checkelist.md

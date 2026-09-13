@@ -12,7 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # contents: write —— 上传离线安装包到 GitHub Release（gh release create）必需；
+      # 只给 read 时会报 HTTP 403: Resource not accessible by integration
+      contents: write
       packages: write
 
     steps:

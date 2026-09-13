@@ -53,3 +53,28 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+
+      # ---------- 离线安装包：docker save -> zip -> GitHub Release ----------
+      # 用途：NAS 直连 GHCR 拉取被重置（connection reset）时的替代安装方式。
+      # 固定发布到预发布版 "image-latest"，每次构建覆盖更新（不刷爆 Release 列表），
+      # 下载地址恒定为:
+      #   https://github.com/<owner>/<repo>/releases/download/image-latest/hollymusic-image-latest.zip
+      # NAS 上使用: 解压得到 image.tar -> docker load -i image.tar -> docker compose up -d
+      - name: Package image (save + zip)
+        run: |
+          IMAGE="${REGISTRY}/${{ steps.prep.outputs.image_name }}:latest"
+          docker pull "$IMAGE"
+          docker save "$IMAGE" -o image.tar
+          zip -q hollymusic-image-latest.zip image.tar
+          ls -lh hollymusic-image-latest.zip
+
+      - name: Upload image zip to GitHub Release (image-latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 删掉旧的预发布与同名 tag，重新创建（附件同名覆盖最可靠的方式）
+          gh release delete image-latest --cleanup-tag --yes || true
+          gh release create image-latest hollymusic-image-latest.zip \
+            --title "Docker image tarball (latest build)" \
+            --notes "NAS 直连 GHCR 拉取失败时的离线安装包（每次 push 自动更新）。用法：下载解压得到 image.tar，SSH 到 NAS 执行 docker load -i image.tar，然后 docker compose up -d。" \
+            --prerelease

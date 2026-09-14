@@ -46,7 +46,7 @@ import { loadCoverTexture, type CoverTexture } from '@/lib/client/particle/cover
 import { enhanceCoverDepth } from '@/lib/client/particle/cover-depth-ai'
 import { loadSkullPointCloud, resampleSkull } from '@/lib/client/particle/skull-points'
 import { isMobileLike, suggestedGrid } from '@/lib/utils/device'
-import { PRESET_CHANGED_EVENT } from '@/lib/client/particle/presets'
+import { subscribePresetChange } from '@/lib/client/particle/presets'
 
 export interface ParticleSceneProps {
   /** 当前播放的原生音频元素；为 null 时粒子仅做静息动画。 */
@@ -187,14 +187,13 @@ export function ParticleScene({
      rendererRef.current.setFx(fx)
    }, [fx])
 
-   // 监听 PRESET_CHANGED_EVENT：从外部（设置面板/歌词面板）切换预设时同步渲染循环
-   useEffect(() => {
-     const onPresetChanged = () => {
-       liveRef.current.preset = loadStoredPreset()
-     }
-     window.addEventListener(PRESET_CHANGED_EVENT, onPresetChanged)
-     return () => window.removeEventListener(PRESET_CHANGED_EVENT, onPresetChanged)
-   }, [])
+  // 监听预设变化（设置面板 / 歌词面板 / 跨窗口 localStorage 同步）：
+  // 外部切换预设时把最新值写入 liveRef，供渲染循环实时采用，无需重建场景。
+  useEffect(() => {
+    return subscribePresetChange((preset) => {
+      liveRef.current.preset = preset
+    })
+  }, [])
 
   useEffect(() => {
     const mount = mountRef.current

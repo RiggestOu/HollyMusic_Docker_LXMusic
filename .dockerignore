@@ -76,5 +76,6 @@ prisma_data/
 .workbuddy/
 .tmp-visual/
 scripts/
+!scripts/start-spa.sh   # Dockerfile 需要从 scripts/ 拷贝启动脚本
 uploads/
 *.part

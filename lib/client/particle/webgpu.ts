@@ -57,13 +57,14 @@ const RIPPLE_LIFE = 2.0
 
 /**
  * 频谱驱动振幅倍率：bass/mid/treble 送进着色器前的整体缩放。
- * 1.0 = 原始强度；0.1 = 频谱对粒子的位移/加速度影响降为十分之一（2026-09-15 用户要求）。
+ * 1.0 = 原始强度；0.01 = 频谱对粒子的位移/加速度影响降为**百分之一**
+ * （2026-09-15 用户两次要求各降十分之一：0.1 → 0.01）。
  * 只作用于 bass/mid/treble（频谱），**不缩放 energy/pulse**：
  *   · energy 参与 alpha 与亮度，一并缩小会让粒子整体变暗变透，超出「降振幅」范围；
  *   · pulse 是节拍冲量（beat），不是频谱。
  * webgl2.ts 有同名同值常量，调参时两处需同步。
  */
-const SPECTRUM_AMPLITUDE = 0.1
+const SPECTRUM_AMPLITUDE = 0.01
 
 /**
  * 封面平面边长：直接对齐 Mineradio 的 PLANE_SIZE = 4.8，与 webgl2.ts 保持一致。
@@ -639,23 +640,42 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     burstScale = 1.0;
   }
 
-  let dir = normalize(tgt + vec3<f32>(1e-4));
+  // ---- 与 webgl2 对齐：归宿位置 + 各项「位移」（不是加速度）----
+  // 本文件最易踩的坑：webgl2 是**无状态**模型，顶点着色器里
+  //   p = base + flow*flowAmp + ripple*1.30 + dir*pulse*(0.45+bass*0.90) + dir*burst*1.60
+  // 各项都是**位移**，量级只有 0.55~2.8，天然有界。
+  // 本文件是**有状态弹簧积分**，早期版本把上述「位移」当成「加速度」写进 acc
+  // （flow 5~20 / pulse 46 / burst 120 / ripple 30），经速度二次积分、阻尼仅 0.9 后
+  // 稳态偏移 ≈ 加速度 / 2.6 —— 爆散项可达 46 个单位，远超相机基线半径 6.6，
+  // 粒子被甩出视野，表现为「出现一下就消失，与 WebGL 完全不一致」。
+  // 现改为与 webgl2 同量级、同公式的**位移**；弹簧只负责平滑趋近，
+  // 既保住切预设/切封面的连续过渡观感，目标又有界 → 不再发散。
+  let base = tgt;
+  let flow = flowField(base, u.time);
+  let flowAmp = (0.55 + u.bass * 1.60 + u.mid * 0.65) * flowScale;
+  tgt = base + flow * flowAmp;
+  // 封面形态 Z 浮雕（webgl2 的 relief，:552-561 同式）：
+  // WGSL 的 presetTarget 里 s<0.5 分支从 compute 走不到（preset<0.5 走了封面分支），
+  // 缺这一项会让默认封面预设比 WebGL 明显偏平 —— 这也是「与 WebGL 不一致」的一环。
+  let mCover = clamp(u.coverMix, 0.0, 1.0) * u.hasCover;
+  if (!isStar && u.preset < 0.5 && mCover > 0.001) {
+    let n1 = snoise(vec3<f32>(base.xy * 1.4, u.time * 0.55));
+    let n2 = snoise(vec3<f32>(base.xy * 2.8 + vec2<f32>(5.0), u.time * 0.85));
+    let n3 = snoise(vec3<f32>(base.xy * 6.5, u.time * 3.5 + p.seed * 4.0));
+    let breath = snoise(vec3<f32>(base.xy * 0.35, u.time * 0.40));
+    let relief = (n1 * 0.60 + n2 * 0.40) * u.mid * 1.15
+               + n3 * u.treble * 0.50 + breath * u.bass * 1.25;
+    tgt = tgt + vec3<f32>(0.0, 0.0, relief * mCover);
+  }
+  // 涟漪抬升（webgl2: p.z += ripple * 1.30）
+  tgt = tgt + vec3<f32>(0.0, 0.0, rippleSum(base.xy, u) * 1.30);
+  let dir = normalize(base + vec3<f32>(1e-4));
+  // 节拍跳动 + 预设切换爆散（webgl2 同式同量级）
+  tgt = tgt + dir * smoothstep(0.0, 1.0, u.pulse) * (0.45 + u.bass * 0.90) * burstScale;
+  tgt = tgt + dir * smoothstep(0.0, 1.0, u.presetBurst) * 1.60 * burstScale;
 
-  // 弹簧：平滑趋近归宿形态（形状之间的过渡全是连续位移，不是跳变）
-  var acc = (tgt - p.pos) * 2.6;
-  // 噪声流场：流体 / 烟雾感的主要来源，轨迹为平滑曲线而非折线
-  acc += flowField(p.pos, u.time) * (5.0 + u.bass * 14.0 + u.mid * 5.0) * flowScale;
-  // 高频细颤
-  acc += flowField(p.pos * 2.7, u.time * 2.2) * (u.treble * 10.0);
-  // 低频呼吸
-  acc += dir * (u.bass * 7.0) * (0.5 + p.seed);
-  // 节拍跳动：smoothstep 缓动后的径向冲量，配合阻尼自然回落
-  acc += dir * smoothstep(0.0, 1.0, u.pulse) * 46.0 * burstScale;
-  // 预设切换爆散：先让粒子离开旧形状，再由弹簧拉向新形状 → 无瞬移
-  acc += dir * smoothstep(0.0, 1.0, u.presetBurst) * 120.0 * burstScale;
-  // 涟漪抬升
-  acc.z += rippleSum(p.pos.xy, u) * 30.0;
-
+  // 弹簧：平滑趋近上述归宿位置（形状切换是连续位移，不是跳变）
+  let acc = (tgt - p.pos) * 2.6;
   p.vel = (p.vel + acc * u.dt) * 0.90;
   p.pos = p.pos + p.vel * u.dt;
   particles[i] = p;

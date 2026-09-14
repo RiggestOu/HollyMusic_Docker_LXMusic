@@ -927,6 +927,7 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
       }
       uniforms.uHasCover.value = 1
       uniforms.uCoverLum.value = cover.luminance
+      console.warn('[particle] WebGL 封面已装载：hasCover=1 coverLum=', cover.luminance)
     },
     setCoverMix(mix: number) {
       uniforms.uCoverMix.value = Math.max(0, Math.min(1, mix))

@@ -75,12 +75,37 @@ const DEFAULT_STAR_COUNT = 1400
  */
 const BUFFER_USAGE = {
   COPY_DST: 0x0008,
-  TEXTURE_BINDING: 0x0004,
   STORAGE: 0x0080,
   UNIFORM: 0x0040,
-  RENDER_ATTACHMENT: 0x0010,
-  COPY_SRC: 0x0001,
+  COPY_SRC: 0x0004,
+  MAP_READ: 0x0001,
 } as const
+
+/**
+ * WebGPU **texture** usage 位标志。
+ *
+ * ⚠ 这是一套与 GPUBufferUsage **数值完全不同**的枚举，绝不能混用：
+ *   GPUTextureUsage.COPY_SRC = 0x01 / COPY_DST = 0x02 / TEXTURE_BINDING = 0x04
+ *   / STORAGE_BINDING = 0x08 / RENDER_ATTACHMENT = 0x10
+ * 而 GPUBufferUsage 的 COPY_DST 是 0x0008、COPY_SRC 是 0x0004。
+ *
+ * 历史坑（2026-09-15 修复）：本文件早期用上面的 BUFFER_USAGE 去建纹理，
+ * 于是「COPY_DST」被建成了 0x0008（= STORAGE_BINDING），真正的 COPY_DST(0x02) 缺失。
+ * `copyExternalImageToTexture` 要求纹理同时具备 COPY_DST 与 RENDER_ATTACHMENT，
+ * 校验不通过时**不抛异常**、只在 uncaptured error 里上报，纹理保持全 0 ——
+ * 表现为「WebGPU 初始化成功、粒子也在动、但专辑封面完全没有内容」，且日志里
+ * 看不到任何报错（try/catch 抓不到异步校验错误），极难定位。
+ */
+const TEXTURE_USAGE = {
+  COPY_SRC: 0x01,
+  COPY_DST: 0x02,
+  TEXTURE_BINDING: 0x04,
+  STORAGE_BINDING: 0x08,
+  RENDER_ATTACHMENT: 0x10,
+} as const
+
+/** GPUMapMode.READ：纹理回读（诊断用）映射模式。 */
+const GPU_MAP_READ = 0x0001
 
 /**
  * Uniform 布局（Float32Array 索引，严格 16 字节对齐）。
@@ -914,6 +939,133 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 }
 `
 
+/**
+ * 诊断：回读粒子缓冲里 N 个粒子，检查每个粒子的位置是否 NaN / Inf、是否在相机视锥内。
+ *
+ * 用途：在切预设后调一次（通过 renderer.checkParticles），确认「粒子被真正摆出来了」，
+ * 把问题归因缩小到「着色器分支没走对 / uniform 传错 / 尺寸算错 / 顶点被丢弃」。
+ *
+ * 判定逻辑（全部基于 position.xyz，不含速度/种子等无关项）：
+ *   - NaN/Inf  → compute shader 出了数学错误（常见于 0 除或 sqrt 负数）
+ *   - |pos| > radius * 10 → 位置异常远，很可能被某项「位移」参数放大到飞出视野
+ *   - viewPos.w <= 0.5 → 粒子在相机背后或贴得太近，会被 clip 丢弃；若所有粒子都这样，
+ *     说明相机状态有问题（半径/视角/投影矩阵错误）
+ *   - pixelSize < 0.5 → 预期像素直径太小，粒子几乎不可见
+ */
+function readbackParticlesAndReport(
+  device: Any,
+  buffer: Any,
+  total: number,
+  FLOATS_PER_PARTICLE: number,
+  radius: number,
+  cameraFov: number,
+  pixelHeightPx: number,
+  tanHalfFov: number,
+  currentPreset: number,
+): void {
+  try {
+    // 字节对齐：每粒子 FLOATS_PER_PARTICLE * 4，buffer 字节长度 = total * 这值
+    const strideBytes = FLOATS_PER_PARTICLE * 4
+    // 每次读 256 个粒子足够覆盖分布，再多意义不大
+    const sampleCount = Math.min(256, total)
+    const bytesNeeded = sampleCount * strideBytes
+    const readBuffer = device.createBuffer({
+      size: bytesNeeded,
+      usage: BUFFER_USAGE.COPY_DST | BUFFER_USAGE.MAP_READ,
+    })
+    const encoder = device.createCommandEncoder()
+    encoder.copyBufferToBuffer(buffer, 0, readBuffer, 0, bytesNeeded)
+    device.queue.submit([encoder.finish()])
+    void readBuffer.mapAsync(GPU_MAP_READ).then(() => {
+      try {
+        const view = new Float32Array(readBuffer.getMappedRange().slice(0))
+        let nanCnt = 0
+        let farCnt = 0
+        let behindCam = 0
+        let tiny = 0
+        const pointSize = view[13] ?? 0
+        const depthSize = (pointSize * radius * 0.062) / Math.max(0.5, radius * 0.8)
+        const pxSize = (2 * radius * 0.8 * tanHalfFov * depthSize) / Math.max(1, pixelHeightPx)
+        for (let i = 0; i < sampleCount; i++) {
+          const o = i * FLOATS_PER_PARTICLE
+          const x = view[o], y = view[o + 1], z = view[o + 2]
+          const bad = Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)
+            || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)
+          if (bad) { nanCnt++; continue }
+          const dist = Math.sqrt(x * x + y * y + z * z)
+          if (dist > radius * 10) farCnt++
+          // 近似深度：z 轴朝向相机为负（与 webgl2 同坐标系）；-z > 0.5 表示在相机前
+          if (z >= -0.5) behindCam++
+          if (pxSize < 0.5) tiny++
+        }
+        console.warn(
+          '[particle] WebGPU 粒子诊断 preset=', currentPreset,
+          'sample=', sampleCount,
+          'nan/inf=', nanCnt,
+          'far(>', radius * 10, ')=', farCnt,
+          'behindClip(z>=-0.5)=', behindCam,
+          'pixelSizeTiny(px<0.5)=', tiny,
+          'expectedPxSize=', pxSize.toFixed(2),
+          nanCnt > 0 ? '⚠ 着色器出了数学错误（0 除 / sqrt 负数等）' : '',
+          farCnt > sampleCount * 0.1 ? '⚠ 大量粒子飞出了合理范围' : '',
+          behindCam === sampleCount ? '⚠ 所有粒子都在相机背后' : '',
+          tiny > sampleCount * 0.5 && pxSize < 0.1 ? '⚠ 预期像素极小 → 视口高度/焦距参数错' : '',
+        )
+      } finally {
+        try { readBuffer.unmap() } catch { /* 已解绑则忽略 */ }
+        try { readBuffer.destroy() } catch { /* 已销毁则忽略 */ }
+      }
+    })
+  } catch (err) {
+    console.warn('[particle] WebGPU 粒子诊断失败：', err)
+  }
+}
+
+/**
+ * 诊断：把封面纹理的中间一行像素从 GPU 回读出来打印。
+ *
+ * 专辑封面「完全没有内容」有三种可能，靠 CPU 侧日志无法区分：
+ *   1. 源画布本身是空白（跨域/解码失败）；
+ *   2. copyExternalImageToTexture 没把像素真正送进纹理（静默失败）；
+ *   3. 纹理没问题，是 coverMix / hasCover 没到位。
+ * 本函数一次性回读即可把 2 与 3 彻底分开：回读像素非黑说明 GPU 侧内容正确，
+ * 问题必在 coverMix/hasCover；回读全 0 则确认是上传环节。
+ * 每次换封面只跑一次，不影响渲染性能。
+ */
+function readbackCoverRow(device: Any, texture: Any, size: number): void {
+  try {
+    // bytesPerRow 必须是 256 的整数倍：一行 256 像素 × 4 字节 = 1024，恰好满足
+    const bytesPerRow = 256
+    const buffer = device.createBuffer({
+      size: bytesPerRow,
+      usage: BUFFER_USAGE.COPY_DST | BUFFER_USAGE.MAP_READ,
+    })
+    const encoder = device.createCommandEncoder()
+    encoder.copyTextureToBuffer(
+      { texture, origin: { x: 0, y: size >> 1 } },
+      { buffer, bytesPerRow },
+      [size, 1, 1],
+    )
+    device.queue.submit([encoder.finish()])
+    void buffer.mapAsync(GPU_MAP_READ).then(() => {
+      try {
+        const row = new Uint8Array(buffer.getMappedRange().slice(0))
+        const at = (x: number) => [row[x * 4], row[x * 4 + 1], row[x * 4 + 2], row[x * 4 + 3]]
+        console.warn(
+          '[particle] WebGPU 封面纹理回读（y=' + (size >> 1) + ' 行）',
+          'x64=', at(64), 'x128=', at(128), 'x192=', at(192),
+          row.every(v => v === 0) ? '⚠ 全 0：纹理内容为空' : '✔ 纹理有内容',
+        )
+      } finally {
+        try { buffer.unmap() } catch { /* 已解绑则忽略 */ }
+        try { buffer.destroy() } catch { /* 已销毁则忽略 */ }
+      }
+    })
+  } catch (err) {
+    console.warn('[particle] WebGPU 封面纹理回读失败：', err)
+  }
+}
+
 /** 把 WGSL 编译诊断拼成可读错误信息。 */
 function formatCompilationErrors(info: Any): string | null {
   const messages: Any[] = info?.messages ?? []
@@ -934,6 +1086,23 @@ export async function createWebGPURenderer(
   if (!adapter) throw new Error('WebGPU adapter 请求失败')
   const device: Any = await adapter.requestDevice()
 
+  // WebGPU 的校验错误是**异步**上报的：queue.copyExternalImageToTexture 之类调用
+  // 参数不合法时不会抛异常、也不会中断渲染，只在这里出现一条 uncaptured error。
+  // 没有这个监听，问题会表现为「初始化成功、粒子在动、但某个效果就是没有内容」，
+  // 且日志里干干净净 —— 本次「专辑封面全黑」正是靠它才能一眼定位。
+  try {
+    const onUncaptured = (event: Any) => {
+      console.warn('[particle] WebGPU 未捕获错误：', event?.error?.message ?? event)
+    }
+    if (typeof device.addEventListener === 'function') {
+      device.addEventListener('uncapturederror', onUncaptured)
+    } else {
+      device.onuncapturederror = onUncaptured
+    }
+  } catch {
+    /* 环境不支持则忽略，不影响渲染 */
+  }
+
   const canvas = document.createElement('canvas')
   canvas.style.display = 'block'
   canvas.style.width = '100%'
@@ -944,6 +1113,9 @@ export async function createWebGPURenderer(
   try {
     const context: Any = canvas.getContext('webgpu')
     if (!context) throw new Error('无法获取 webgpu canvas context')
+    // 同时拿 2D 上下文，后续用于「渲染结果采样」诊断（每预设切一次）
+    canvas2dCtx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!canvas2dCtx) console.warn('[particle] WebGPU 未获 2D context，渲染采样诊断将跳过')
     const format = gpu.getPreferredCanvasFormat()
     context.configure({ device, format, alphaMode: 'opaque' })
 
@@ -1020,10 +1192,13 @@ export async function createWebGPURenderer(
     const coverTexture = device.createTexture({
       size: [COVER_TEXTURE_SIZE, COVER_TEXTURE_SIZE, 1],
       format: 'rgba8unorm',
+      // COPY_DST 必须来自 TEXTURE_USAGE（0x02），不能用 BUFFER_USAGE 的同名字段（0x08）
+      // COPY_SRC 供诊断回读使用
       usage:
-        BUFFER_USAGE.TEXTURE_BINDING |
-        BUFFER_USAGE.COPY_DST |
-        BUFFER_USAGE.RENDER_ATTACHMENT,
+        TEXTURE_USAGE.TEXTURE_BINDING |
+        TEXTURE_USAGE.COPY_DST |
+        TEXTURE_USAGE.COPY_SRC |
+        TEXTURE_USAGE.RENDER_ATTACHMENT,
     })
     device.queue.copyExternalImageToTexture(
       { source: placeholder.canvas },
@@ -1034,7 +1209,12 @@ export async function createWebGPURenderer(
     const edgeTexture = device.createTexture({
       size: [256, 256, 1],
       format: 'rgba8unorm',
-      usage: BUFFER_USAGE.TEXTURE_BINDING | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.RENDER_ATTACHMENT,
+      // 同上：纹理必须用 TEXTURE_USAGE，否则 COPY_DST 位错成 STORAGE_BINDING，
+      // 上传静默失败 → 边缘/深度图全 0 → 封面浮雕与描边全部失效
+      usage:
+        TEXTURE_USAGE.TEXTURE_BINDING |
+        TEXTURE_USAGE.COPY_DST |
+        TEXTURE_USAGE.RENDER_ATTACHMENT,
     })
     const neutralEdge = document.createElement('canvas')
     neutralEdge.width = 256
@@ -1129,6 +1309,8 @@ export async function createWebGPURenderer(
     let drawHeightPx = 1
     /** 动效参数（滑杆实时更新） */
     const fx: FxSettings = { ...DEFAULT_FX }
+    /** 记录上次诊断过的「预设·封面组合」键，避免每帧刷屏 */
+    let lastDiagPresetLogged: string | undefined = undefined
 
     const writeUniforms = (f: AudioFeatures, c: CameraState) => {
       const sp = Math.sin(c.phi)
@@ -1241,6 +1423,16 @@ export async function createWebGPURenderer(
           console.warn('[particle] 封面上传失败：', err)
           return
         }
+        // 一次性回读：确认像素是否真的进了 GPU 纹理（区分「源画布空白」与「上传失败」）
+        readbackCoverRow(device, coverTexture, COVER_TEXTURE_SIZE)
+        // 诊断：源画布中心像素 —— 用于区分「画布本身空白」与「WebGPU 上传失败」
+        try {
+          const c2 = cover.canvas.getContext('2d')
+          const px = c2?.getImageData(COVER_TEXTURE_SIZE >> 1, COVER_TEXTURE_SIZE >> 1, 1, 1)?.data
+          console.warn('[particle] WebGPU 封面源画布中心像素 rgba=', px ? [px[0], px[1], px[2], px[3]] : '无法读取')
+        } catch (e) {
+          console.warn('[particle] WebGPU 封面源画布读取失败（可能跨域）：', e)
+        }
         if (cover.edgeCanvas) {
           try {
             device.queue.copyExternalImageToTexture(
@@ -1254,6 +1446,7 @@ export async function createWebGPURenderer(
         }
         uniformF32[U.hasCover] = 1
         uniformF32[U.coverLum] = cover.luminance
+        console.warn('[particle] WebGPU 封面已上传：hasCover=1 coverLum=', cover.luminance)
       },
       setCoverMix(mix: number) {
         uniformF32[U.coverMix] = Math.max(0, Math.min(1, mix))
@@ -1278,6 +1471,16 @@ export async function createWebGPURenderer(
       },
       setPreset(preset: number) {
         uniformF32[U.preset] = preset
+        // 切预设后延迟 1.5s 做一次粒子诊断：此时 compute 已完成一轮，位置已落位
+        setTimeout(() => {
+          console.warn('[particle] WebGPU 切预设诊断 start preset=', preset)
+          readbackParticlesAndReport(
+            device, particleBuffer, total, FLOATS_PER_PARTICLE,
+            radius, camera.fov, drawHeightPx,
+            uniformF32[U.tanHalfFov],
+            preset,
+          )
+        }, 1500)
       },
       setPresetBurst(value: number) {
         uniformF32[U.presetBurst] = Math.max(0, Math.min(1, value))
@@ -1311,6 +1514,39 @@ export async function createWebGPURenderer(
         rp.end()
 
         device.queue.submit([encoder.finish()])
+        // 渲染完做一次轻量颜色采样：在画布左上/右上/左下/右下各取 1 像素，
+        // 若四周全黑 (0.031/0.031/0.047 清屏底色) 说明「没有任何粒子被渲染出来」。
+        // 这是 13 个预设通用的视觉完整性探针：任何预设失败都能被这一条抓住。
+        // 节流：仅当 preset 或 coverMix 变化时才采样，避免 60fps 刷屏。
+        const diagKey = `${Math.round(uniformF32[U.preset] * 10)}.${Math.round(uniformF32[U.coverMix] * 10)}`
+        if (diagKey !== lastDiagPresetLogged) {
+          lastDiagPresetLogged = diagKey
+          try {
+            const c2d = canvas.getContext('2d', { willReadFrequently: true }) as Any
+            if (!c2d) return
+            const corners = [
+              { x: 8, y: 8, label: '左上' },
+              { x: canvas.width - 9, y: 8, label: '右上' },
+              { x: 8, y: canvas.height - 9, label: '左下' },
+              { x: canvas.width - 9, y: canvas.height - 9, label: '右下' },
+            ]
+            const samplePoints = corners
+              .map(({ x, y, label }) => {
+                const d = canvas2dCtx?.getImageData(x, y, 1, 1)?.data
+                if (!d) return { label, rgba: null }
+                return { label, rgba: [d[0], d[1], d[2], d[3]] }
+              })
+            const allClear = samplePoints.every((p: Any) => !p.rgba || (p.rgba[0] <= 8 && p.rgba[1] <= 8 && p.rgba[2] <= 8))
+            console.warn(
+              '[particle] WebGPU 渲染采样 preset=', uniformF32[U.preset],
+              '画面尺寸=', canvas.width, 'x', canvas.height,
+              '四角采样=', JSON.stringify(samplePoints.map((p: Any) => ({ ...p, rgba: p.rgba ? p.rgba.slice(0, 3) : 'no2d' }))),
+              allClear ? '⚠ 四角均为清屏底色 → 画布未被任何粒子填充（渲染失败）' : '✔ 画布有内容',
+            )
+          } catch (err) {
+            console.warn('[particle] WebGPU 渲染采样失败：', err)
+          }
+        }
       },
       dispose() {
         particleBuffer.destroy?.()

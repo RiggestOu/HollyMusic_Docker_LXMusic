@@ -44,18 +44,19 @@ export const DEFAULT_FX: FxSettings = {
   bloom: 0.62,
   edge: 1,
   bgFade: 0.2,
-  spectrumAmp: 0.01,
+  // 实验调参默认值（与 lib/client/particle/types.ts 的 DEFAULT_FX 保持一致）
+  spectrumAmp: 0.06,
   flowBase: 0.55,
   flowBass: 1.6,
   flowMid: 0.65,
-  rippleAmp: 1.3,
-  pulseBase: 0.45,
+  rippleAmp: 0.13,
+  pulseBase: 0.03,
   pulseBass: 0.9,
   burstAmp: 1.6,
   reliefAmp: 1.0,
   sizeBase: 36.0,
   sizeMax: 4.95,
-  brightBase: 0.82,
+  brightBase: 0.7,
   alphaBase: 0.55,
 }
 

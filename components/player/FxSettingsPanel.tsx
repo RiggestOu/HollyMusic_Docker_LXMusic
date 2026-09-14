@@ -57,6 +57,15 @@ function loadLyricsMode(): LyricsMode {
   }
 }
 
+/**
+ * 歌词显示模式变更广播。
+ *
+ * 真正持有 mode 状态并渲染歌词的是 LyricsPanel（它用 useState 惰性读 localStorage），
+ * 本面板只是「入口」——不广播的话，这里改了 localStorage 对方也不会重新读取，
+ * 表现为「切换任何模式都不生效」。
+ */
+export const LYRICS_MODE_CHANGED_EVENT = 'hm-lyrics-mode-changed'
+
 function saveLyricsMode(m: LyricsMode) {
   try {
     localStorage.setItem('lyrics-display-mode', m)
@@ -232,6 +241,11 @@ export function ParticleSettingsPanel({ open, onClose }: { open: boolean; onClos
                       onClick={() => {
                         setLyricsMode(mode)
                         saveLyricsMode(mode)
+                        // 关键：真正生效的 mode 状态在 LyricsPanel 里（它从 localStorage 惰性初始化），
+                        // 本面板只是入口。必须广播，否则「任何模式都不生效」。
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(new Event(LYRICS_MODE_CHANGED_EVENT))
+                        }
                       }}
                       className={`flex flex-col items-center gap-1.5 rounded-lg border px-3 py-3 text-xs transition ${
                         lyricsMode === mode

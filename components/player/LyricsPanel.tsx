@@ -20,7 +20,7 @@ import { isMobileLike } from '@/lib/utils/device'
 import { CoverImage } from '@/components/shared/CoverImage'
 import { AudioSpectrum } from './AudioSpectrum'
 import { ParticleScene } from './ParticleScene'
-import { ParticleSettingsPanel } from './FxSettingsPanel'
+import { ParticleSettingsPanel, LYRICS_MODE_CHANGED_EVENT } from './FxSettingsPanel'
 import { ParticleTuningPanel } from './ParticleTuningPanel'
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -170,6 +170,23 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
 
   // 歌词显示模式（持久化：下次打开保持上次选择）
   const [mode, setMode] = useState<LyricsMode>(loadLyricsMode)
+  /**
+   * 模式可能在「设置 → 歌词显示」里被改（那里写 localStorage 并广播事件），
+   * 但本组件才是真正渲染歌词的一方 —— 必须监听并同步，否则切换任何模式都不生效。
+   * 同时监听 storage 事件，兼容多标签页 / Tauri 多窗口。
+   */
+  useEffect(() => {
+    const sync = () => setMode(loadLyricsMode())
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'lyrics-display-mode') sync()
+    }
+    window.addEventListener(LYRICS_MODE_CHANGED_EVENT, sync)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(LYRICS_MODE_CHANGED_EVENT, sync)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [])
   const cycleMode = () => {
     setMode(m => {
       const next = MODE_ORDER[(MODE_ORDER.indexOf(m) + 1) % MODE_ORDER.length]
@@ -278,9 +295,12 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           )}
         </div>
 
-        {/* ── 模式 1：平铺视窗（默认）── */}
+        {/* ── 模式 1：平铺视窗（默认）──
+            pointer-events-none：本容器是 absolute inset-0，若不穿透会整块盖住粒子画布，
+            吞掉所有指针事件 → 相机旋转/平移/拉伸全部失灵（另一模式那层就漏了这一句）。
+            歌词行自身再用 pointer-events-auto 收回点击（点行跳转）能力。 */}
         {mode === 'tile' && (
-          <div className="absolute inset-0 overflow-y-auto px-4 py-8">
+          <div className="pointer-events-none absolute inset-0 overflow-y-auto px-4 py-8">
             {loading ? (
               <div className="text-center text-white/50">加载歌词...</div>
             ) : hasLyric ? (
@@ -293,7 +313,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
                       key={i}
                       ref={i === activeIndex ? activeRef : undefined}
                       onClick={seekable ? () => seek(line.time) : undefined}
-                      className={`text-center text-xl transition-all ${
+                      className={`pointer-events-auto text-center text-xl transition-all ${
                         seekable ? 'cursor-pointer ' : ''
                       }${
                         i === activeIndex
@@ -316,8 +336,10 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
             外层 perspective + 内层 rotateX 倾斜形成「平面」，
             当前句 translateZ 凸出、随距离衰减形成前后景深，
             整面随镜头缓慢左右摆动（与粒子静息自转节奏呼应） */}
+        {/* 同样需要 pointer-events-none：本容器也是 absolute inset-0，否则切到本模式后相机依旧失灵。
+            歌词行用 pointer-events-auto 收回点击跳转。 */}
         {mode === 'plane' && (
-          <div className="absolute inset-0 overflow-y-auto px-4 py-16 [perspective:900px]">
+          <div className="pointer-events-none absolute inset-0 overflow-y-auto px-4 py-16 [perspective:900px]">
             <div
               className="mx-auto max-w-2xl space-y-6"
               style={{ transformStyle: 'preserve-3d', animation: 'hm-lyric-sway 22s ease-in-out infinite alternate' }}
@@ -337,7 +359,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
                       style={{
                         transform: `translateZ(${z}px) scale(${i === activeIndex ? 1.12 : 1})`,
                       }}
-                      className={`text-center text-xl transition-all duration-300 ${
+                      className={`pointer-events-auto text-center text-xl transition-all duration-300 ${
                         seekable ? 'cursor-pointer ' : ''
                       }${
                         i === activeIndex ? 'font-bold text-white' : 'text-white/40 hover:text-white/75'

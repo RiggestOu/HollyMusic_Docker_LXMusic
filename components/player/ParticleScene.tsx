@@ -170,6 +170,12 @@ export function ParticleScene({
   const hasCoverRef = useRef(false)
   /** 封面代次：每装载一张新封面 +1，渲染循环据此把 coverMix 归零重聚。 */
   const coverEpochRef = useRef(0)
+  /** 诊断用：上一次打印过的预设（预设变化时只打一次，避免刷屏）。 */
+  const lastLoggedPresetRef = useRef<number | undefined>(undefined)
+  /** 诊断用：封面已成形只打一次；散开后复位，便于再次观察。 */
+  const coverFormedLoggedRef = useRef(false)
+  /** 诊断用：封面状态摘要的节流时间戳（ms），每 2 秒打一次。 */
+  const lastCoverSummaryAtRef = useRef(0)
   /** 骷髅点云是否已加载过（避免重复 fetch）。 */
   const skullLoadedRef = useRef(false)
   /** 当前动效参数：每次 `fx` prop 变化都更新这里，渲染循环读取它。 */
@@ -584,12 +590,46 @@ export function ParticleScene({
           if (coverEpochRef.current !== seenEpoch) {
             seenEpoch = coverEpochRef.current
             coverMix = 0 // 新封面：先散开成星云，再重新聚拢成新的专辑图
+            console.warn('[particle] 封面代次变化 epoch=', seenEpoch, '→ coverMix 归零重聚')
           }
           const target = nextPreset < 0.5 && hasCoverRef.current ? 1 : 0
           coverMix += (target - coverMix) * (1 - Math.exp(-dt * MORPH_RATE))
           // smoothstep 缓动：起步与收尾都平缓，中途快，避免「线性拉伸」的机械感
           const eased = coverMix * coverMix * (3 - 2 * coverMix)
           renderer?.setCoverMix(eased)
+
+          // ---- 诊断：专辑封面成形的判定链路 ----
+          // 专辑封面不出现的典型原因都在这里：nextPreset 丢失（undefined 时 < 0.5 为 false）、
+          // hasCover 未置位、或 coverMix 被 epoch 反复归零。以下只在状态跨越时打一次，避免刷屏。
+          if (nextPreset !== lastLoggedPresetRef.current) {
+            lastLoggedPresetRef.current = nextPreset
+            console.warn(
+              '[particle] 预设生效 nextPreset=', nextPreset,
+              'typeof=', typeof nextPreset,
+              'hasCover=', hasCoverRef.current,
+              '→封面目标 target=', target,
+            )
+          }
+          if (eased > 0.9 && !coverFormedLoggedRef.current) {
+            coverFormedLoggedRef.current = true
+            console.warn('[particle] 专辑封面已成形 coverMix=', eased.toFixed(3))
+          } else if (eased < 0.1 && coverFormedLoggedRef.current) {
+            coverFormedLoggedRef.current = false
+          }
+          // 每 2 秒一条摘要：预设 0 下即使什么都不变也能看到 coverMix 是否在推进，
+          // 这是区分「hasCover 没置位」与「coverMix 被反复归零」的决定性证据。
+          if (now - lastCoverSummaryAtRef.current > 2000) {
+            lastCoverSummaryAtRef.current = now
+            console.warn(
+              '[particle] 封面状态 backend=', r.backend,
+              'preset=', nextPreset,
+              'hasCover=', hasCoverRef.current,
+              'epoch=', coverEpochRef.current,
+              'coverMix=', coverMix.toFixed(3),
+              'eased=', eased.toFixed(3),
+              'target=', target,
+            )
+          }
 
           // 静息时极缓慢自转，避免画面完全静止
           if (mode === 'none' && touchMode === 'none') rig.theta += 0.00035

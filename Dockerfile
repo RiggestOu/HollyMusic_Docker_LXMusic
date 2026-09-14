@@ -129,9 +129,9 @@ RUN mkdir -p /app/custom-sources
 # ---------- 前端静态产物给 nginx ----------
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 
-# ---------- nginx 配置 + 启动脚本 ----------
+# ---------- nginx 配置 + 启动脚本（start-spa.sh 放在根目录，避免 .dockerignore 排除 scripts/ 导致构建失败）----------
 COPY nginx-spa.conf /etc/nginx/conf.d/default.conf
-COPY scripts/start-spa.sh /app/start-spa.sh
+COPY start-spa.sh /app/start-spa.sh
 RUN chmod +x /app/start-spa.sh
 
 EXPOSE 3000

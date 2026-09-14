@@ -15,7 +15,7 @@
 
 services:
   app:
-    image: hollymusic_docker_lxmusic:latest
+    image: ghcr.io/riggestou/hollymusic_docker_lxmusic:latest
     container_name: holly-music
 
     pull_policy: never

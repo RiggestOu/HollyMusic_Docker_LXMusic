@@ -71,11 +71,9 @@ jobs:
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
 
-      # ---------- 每次构建都更新固定预发布 desktop-latest（无需打 tag，入口恒定） ----------
-      # 与 build.yml 的 image-latest 同一套思路：删旧建新，下载地址永远不变。
-      # 镜像 zip 与客户端 zip 分开两个 Release：
-      #   image-latest   -> hollymusic-image-latest.zip   （内含 image.tar，NAS 用）
-      #   desktop-latest -> hollymusic-desktop-latest.zip （内含安装 exe，PC 用）
+      # ---------- 每次构建都更新固定预发布（无需打 tag，入口恒定） ----------
+      # 与 build.yml 使用 build-<run_number> 同一套思路：删旧建新，下载地址永远不变。
+      #   build-<N> -> hollymusic-desktop-latest.zip （内含安装 exe，PC 用）
       - name: Package installer zip
         shell: pwsh
         run: |
@@ -83,13 +81,14 @@ jobs:
           Compress-Archive -Path $exe.FullName -DestinationPath "hollymusic-desktop-latest.zip" -Force
           Get-Item "hollymusic-desktop-latest.zip" | Select-Object Name, Length
 
-      - name: Upload installer zip to GitHub Release (desktop-latest)
+      - name: Upload installer zip to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete desktop-latest --cleanup-tag --yes || true
-          gh release create desktop-latest hollymusic-desktop-latest.zip \
-            --title "Windows client installer (latest build)" \
+          RELEASE_TAG="build-${{ github.run_number }}"
+          gh release delete "$RELEASE_TAG" --cleanup-tag --yes || true
+          gh release create "$RELEASE_TAG" hollymusic-desktop-latest.zip \
+            --title "Windows client build ${{ github.run_number }}" \
             --notes "每次 push 自动更新的最新 Windows 安装包（版本 v0.0.1）。下载解压后运行里面的 setup exe 安装；会弹出 UAC 管理员确认，点【是】即可装进系统安装目录。如旧版正在运行，安装程序会先自动结束旧进程。" \
             --prerelease

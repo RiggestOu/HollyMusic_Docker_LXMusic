@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { usePlayerStore } from '@/lib/store/player-store'
 import { useFavoritesStore } from '@/lib/store/favorites-store'
 import { useDownload } from '@/hooks/useDownload'
+import { useFxSettingsStore } from '@/lib/store/fx-settings-store'
 import {
   PRESETS,
   PRESET_CHANGED_EVENT,
@@ -19,6 +20,7 @@ import { isMobileLike } from '@/lib/utils/device'
 import { CoverImage } from '@/components/shared/CoverImage'
 import { AudioSpectrum } from './AudioSpectrum'
 import { ParticleScene } from './ParticleScene'
+import { ParticleSettingsPanel } from './FxSettingsPanel'
 import type { LucideIcon } from 'lucide-react'
 import {
   Play,
@@ -35,6 +37,7 @@ import {
   Heart,
   Download,
   X,
+  SlidersHorizontal,
 } from 'lucide-react'
 
 interface LyricsPanelProps {
@@ -98,7 +101,14 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
 
   // 13 种视觉预设（与粒子设置卡共用同一份数据源与持久化）
   const [preset, setPreset] = useState(() => loadStoredPreset())
-  const [presetOpen, setPresetOpen] = useState(false)
+  /** 实际生效的渲染后端（WebGPU / WebGL 2.0），由 ParticleScene 回报 */
+  const [backend, setBackend] = useState<string | null>(null)
+  /** 粒子设置面板（预设 + 动效统一）开合 */
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  /** 当前动效参数（来自全局 store，滑动实时同步） */
+  const fx = useFxSettingsStore(s => s.fx)
+  /** 后端偏好（来自全局 store，用户可在设置面板切换） */
+  const backendPreference = useFxSettingsStore(s => s.backendPreference)
   const applyPreset = (index: number) => {
     const next = clampPreset(index)
     setPreset(next)
@@ -227,6 +237,8 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           audio={audio}
           isPlaying={isPlaying}
           preset={preset}
+          preference={backendPreference}
+          fx={fx}
           coverUrl={
             loadStoredCustomImage() ??
             (track ? buildCoverUrl(track.uid, track.musicInfo.img) : null)
@@ -235,38 +247,35 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           fps={60}
           pointSize={0.9}
           className="absolute inset-0"
+          onBackend={setBackend}
         />
 
-        {/* 13 种视觉预设切换（与粒子设置卡同一份数据源） */}
-        <div className="absolute right-3 top-3 z-10">
+        {/* 右上角：齿轮按钮（打开粒子设置面板，含视觉预设 + 动效参数标签页） + 后端指示 */}
+        <div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-1">
           <button
-            onClick={() => setPresetOpen(v => !v)}
-            className="touch-target flex items-center gap-1.5 rounded-full border border-white/15 bg-black/40 px-3 py-1.5 text-xs text-white/70 backdrop-blur transition hover:text-white"
-            title="切换视觉预设"
+            onClick={() => setSettingsOpen(v => !v)}
+            className={`touch-target flex items-center justify-center rounded-full border border-white/15 bg-black/40 p-1.5 backdrop-blur transition hover:text-white ${
+              settingsOpen ? 'text-primary' : 'text-white/70'
+            }`}
+            title="粒子设置"
+            aria-label="粒子设置（含视觉预设与动效参数）"
           >
-            <Sparkles className="h-3.5 w-3.5" />
-            {PRESETS[preset]?.label ?? '预设'} {preset + 1}/{PRESETS.length}
+            <SlidersHorizontal className="h-3.5 w-3.5" />
           </button>
-          {presetOpen && (
-            <div className="absolute right-0 top-10 w-56 rounded-xl border border-white/10 bg-black/70 p-2 shadow-lg backdrop-blur">
-              <div className="grid max-h-52 grid-cols-2 gap-1 overflow-y-auto">
-                {PRESETS.map(item => (
-                  <button
-                    key={item.key}
-                    onClick={() => applyPreset(item.id)}
-                    title={item.hint}
-                    aria-pressed={preset === item.id}
-                    className={`rounded-md px-1.5 py-1 text-left text-[11px] leading-tight transition ${
-                      preset === item.id
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-white/60 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+          {/* 渲染后端指示：WebGPU 优先，不支持时自动降级 WebGL 2.0 */}
+          {backend && (
+            <span
+              className={`block text-right text-[10px] ${
+                backend === 'webgpu' ? 'text-emerald-400/80' : 'text-white/40'
+              }`}
+              title={
+                backend === 'webgpu'
+                  ? '正在使用 WebGPU（Compute Shader）'
+                  : '已降级到 WebGL 2.0：WebGPU 仅在 HTTPS 或 localhost 下可用'
+              }
+            >
+              {backend === 'webgpu' ? 'WebGPU' : 'WebGL 2.0'}
+            </span>
           )}
         </div>
 
@@ -491,7 +500,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
               aria-valuemin={0}
               aria-valuemax={Math.max(0, Math.round(duration))}
               aria-valuenow={Math.round(dragRatio !== null ? duration * dragRatio : currentTime)}
-              className="relative h-1 flex-1 cursor-pointer touch-none overflow-hidden rounded-full bg-muted after:absolute after:inset-x-0 after:-top-2 after:-bottom-2 after:content-['']"
+              className="relative h-1 flex-1 cursor-pointer touch-none overflow-visible rounded-full bg-muted after:absolute after:inset-x-0 after:-top-2 after:-bottom-2 after:content-['']"
             >
             <div
               className={`absolute inset-y-0 left-0 rounded-full bg-primary ${
@@ -507,6 +516,23 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
                         ? (currentTime / duration) * 100
                         : 0
                 }%`,
+              }}
+            />
+            {/* 白色小圆点：跟随播放位置，hover/拖拽时显示 */}
+            <div
+              className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow"
+              style={{
+                left: `${
+                  dragRatio !== null
+                    ? dragRatio * 100
+                    : buffering
+                      ? bufferProgress ?? 0
+                      : duration > 0
+                        ? (currentTime / duration) * 100
+                        : 0
+                }%`,
+                opacity: dragRatio !== null ? 1 : 0,
+                transition: dragRatio === null ? 'opacity 0.2s' : 'none',
               }}
             />
           </div>
@@ -619,6 +645,9 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           </button>
         </div>
       </div>
+
+      {/* 粒子设置抽屉（含视觉预设 + 动效参数标签页，覆盖在 dialog 之上） */}
+      <ParticleSettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

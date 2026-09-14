@@ -10,6 +10,7 @@ import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-
 import { Sidebar, MobileSidebar } from './components/Layout'
 import { MobileHeader } from './components/MobileHeader'
 import { ServiceWorkerRegister } from './components/ServiceWorkerRegister'
+import { useParticleLogger } from '@/hooks/useParticleLogger'
 import { PlayerBar } from '@/components/player/PlayerBar'
 import { QueuePanel } from '@/components/player/QueuePanel'
 import { LyricsPanel } from '@/components/player/LyricsPanel'

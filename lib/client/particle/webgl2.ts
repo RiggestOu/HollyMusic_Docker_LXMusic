@@ -28,7 +28,7 @@
 
 import * as THREE from 'three'
 import { COVER_TEXTURE_SIZE, createPlaceholderCover } from './cover-texture'
-import { BASE_FOV, verticalFovForAspect } from './types'
+import { BASE_FOV, DEFAULT_FX, verticalFovForAspect } from './types'
 import type { AudioFeatures, CameraState, ParticleRenderer, ParticleRendererOptions } from './types'
 
 /** 与 WGSL 路径一致的配色（香槟金 / 薄荷绿 / 近黑）。 */
@@ -60,6 +60,8 @@ const VERTEX_SHADER = /* glsl */ `
 
   uniform float uTime, uBass, uMid, uTreble, uEnergy, uPulse;
   uniform float uPointSize, uPixel, uCoverMix, uHasCover, uPlane, uCoverLum;
+  // 动效参数（对应 Mineradio 的 fx 滑块）
+  uniform float uIntensity, uSpeed, uDepth, uTwist, uScatter, uBloom, uEdge, uBgFade;
   uniform float uPreset, uPresetBurst;
   uniform vec3 uColorA, uColorB;
   uniform sampler2D uCoverTex;
@@ -186,8 +188,9 @@ const VERTEX_SHADER = /* glsl */ `
    * 以及依赖 uCoverRes 的 hiResGuard（无对应设置，等价于取 1）。
    */
   vec3 presetTarget(vec2 uv, float seed, vec3 anchor) {
-    float K = 1.36;
-    float t = uTime;
+    // 律动强度：K = intensity * 1.6（其 uIntensity 默认 0.85 → 1.36）
+    float K = uIntensity * 1.6;
+    float t = uTime * uSpeed;
     float s = uPreset;
     float plane = uPlane;
     // 其平面坐标由 gx/(grid-1) 生成，等价于 (aUv - 0.5) * PLANE_SIZE
@@ -203,7 +206,9 @@ const VERTEX_SHADER = /* glsl */ `
                     * uTreble * 0.18 * K;
       float bassBreath = snoise(vec3(c.x * 0.35, c.y * 0.35, t * 0.4)) * uBass * 0.42 * K;
       // 深度/边缘纹理：R=depth → 浮雕位移（原式 depthZ = (depthVal-0.5)*uAiBoost*uDepth*1.40）
-      float depthZ = (texture2D(uEdgeTex, clamp(uv, vec2(0.0022), vec2(0.9978))).r - 0.5) * 1.40;
+      float depthZ =
+        (texture2D(uEdgeTex, clamp(uv, vec2(0.0022), vec2(0.9978))).r - 0.5)
+        * uDepth * 1.40;
       return vec3(c.x, c.y, midDisp + trebleJ + bassBreath + depthZ);
     }
 
@@ -507,10 +512,21 @@ const VERTEX_SHADER = /* glsl */ `
       base = presetTarget(aUv, aRand, position);
     }
 
+    // 粒子扭曲：绕视轴旋转（原式的 uTwist）
+    if (uTwist > 0.0) {
+      float tw = uTwist * (0.6 + base.z * 0.2);
+      float cw = cos(tw), sw = sin(tw);
+      base = vec3(cw * base.x - sw * base.y, sw * base.x + cw * base.y, base.z);
+    }
+    // 离散感：沿径向随机外扩（原式的 uScatter）
+    if (uScatter > 0.0) {
+      base += normalize(base + vec3(1e-4)) * (aRand - 0.5) * uScatter * 2.0;
+    }
+
     // 涟漪作用于归宿位置的水平坐标（封面形态下即图像平面）
     float ripple = rippleSum(base.xy);
     // 深度/边缘纹理：G=edge → 发光边强度（原式 edgeBoost）
-    float edgeBoost = texture2D(uEdgeTex, clamp(aUv, vec2(0.0022), vec2(0.9978))).g;
+    float edgeBoost = texture2D(uEdgeTex, clamp(aUv, vec2(0.0022), vec2(0.9978))).g * uEdge;
 
     // 流动强度：封面形态下大幅减弱，否则图像会被流动抹糊
     float flowScale = isCover ? mix(1.0, 0.30, m) : 0.25;
@@ -660,6 +676,8 @@ const VERTEX_SHADER = /* glsl */ `
     float bodyAlpha = (0.55 + 0.45 * smoothstep(0.0, 1.0, 0.32 + uEnergy * 0.60))
                     * mix(1.0, 0.94, m);
     vAlpha = isStar ? twinkle * 0.75 : bodyAlpha;
+    // 光晕强度：以默认值 0.62 为 1.0 基准，保证出厂观感不变
+    vAlpha *= uBloom / 0.62;
     // 虚空预设（索引 3）：隐去全部预设粒子，只留星河背景。
     // 这是 Mineradio 的 VOID 原始语义。实测把它画成一个包围相机的壳层时，
     // 加法混合会整屏曝白（mean 亮度 254/255）—— 也就是「屏幕都变白色了」的根因。
@@ -811,6 +829,14 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     uHasCover: { value: 0 },
     uCoverLum: { value: 0.5 },
     uPlane: { value: plane },
+    uIntensity: { value: DEFAULT_FX.intensity },
+    uSpeed: { value: DEFAULT_FX.speed },
+    uDepth: { value: DEFAULT_FX.depth },
+    uTwist: { value: DEFAULT_FX.twist },
+    uScatter: { value: DEFAULT_FX.scatter },
+    uBloom: { value: DEFAULT_FX.bloom },
+    uEdge: { value: DEFAULT_FX.edge },
+    uBgFade: { value: DEFAULT_FX.bgFade },
     uPreset: { value: 0 },
     uPresetBurst: { value: 0 },
     uColorA: { value: COLOR_CHAMPAGNE.clone() },
@@ -880,6 +906,16 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     },
     setCoverMix(mix: number) {
       uniforms.uCoverMix.value = Math.max(0, Math.min(1, mix))
+    },
+    setFx(fx) {
+      uniforms.uIntensity.value = fx.intensity
+      uniforms.uSpeed.value = fx.speed
+      uniforms.uDepth.value = fx.depth
+      uniforms.uTwist.value = fx.twist
+      uniforms.uScatter.value = fx.scatter
+      uniforms.uBloom.value = fx.bloom
+      uniforms.uEdge.value = fx.edge
+      uniforms.uBgFade.value = fx.bgFade
     },
     setSkullPoints(positions) {
       if (!positions || positions.length < 3) return

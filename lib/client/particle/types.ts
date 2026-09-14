@@ -58,6 +58,37 @@ export interface CameraState {
   target: readonly [number, number, number]
 }
 
+/** 动效参数（与 Mineradio 的 fx 滑块一一对应；默认值即其出厂默认）。 */
+export interface FxSettings {
+  /** 律动强度 0.2~1.6，默认 0.85 → K = intensity * 1.6 */
+  intensity: number
+  /** 运动速度 0.2~2.5，默认 1.0 */
+  speed: number
+  /** 画面景深 0.2~1.8，默认 0.20 */
+  depth: number
+  /** 粒子扭曲 0~0.6，默认 0 */
+  twist: number
+  /** 离散感 0~0.5，默认 0 */
+  scatter: number
+  /** 光晕强度 0~1.6，默认 0.62（以此为 1.0 基准） */
+  bloom: number
+  /** 轮廓高亮开关，默认开 */
+  edge: number
+  /** 背景压暗 0~1.2，默认 0.20 */
+  bgFade: number
+}
+
+export const DEFAULT_FX: FxSettings = {
+  intensity: 0.85,
+  speed: 1.0,
+  depth: 0.2,
+  twist: 0,
+  scatter: 0,
+  bloom: 0.62,
+  edge: 1,
+  bgFade: 0.2,
+}
+
 export interface ParticleRendererOptions {
   container: HTMLElement
   /** 粒子数量（grid×grid） */
@@ -106,6 +137,8 @@ export interface ParticleRenderer {
    * 传 null 表示尚未加载，此时预设 6 退化为当前占位表现。
    */
   setSkullPoints(positions: Float32Array | null): void
+  /** 下发动效参数（滑块实时调节）。 */
+  setFx(fx: FxSettings): void
   /**
    * 切换粒子视觉预设（0..12，见 PRESETS 常量表）。
    *

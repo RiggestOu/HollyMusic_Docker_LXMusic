@@ -70,3 +70,11 @@ src-tauri/
 META-INF/
 .next/
 .pnpm-store/
+
+# ---------- 2026-09-14 补充：本机数据与辅助文件不进构建上下文 ----------
+prisma_data/
+.workbuddy/
+.tmp-visual/
+scripts/
+uploads/
+*.part

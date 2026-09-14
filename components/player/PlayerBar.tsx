@@ -9,7 +9,7 @@ import { PlayerControls } from './PlayerControls'
 import { PlayerTools } from './PlayerTools'
 import { PlayerButton } from './PlayerButton'
 import { MobilePlayerMenu } from './MobilePlayerMenu'
-import { Mic2, ListMusic, Sparkles } from 'lucide-react'
+import { Mic2, ListMusic } from 'lucide-react'
 
 interface PlayerBarProps {
   audio: HTMLAudioElement | null
@@ -22,8 +22,6 @@ export function PlayerBar({ audio, onAudioElement }: PlayerBarProps) {
   const volume = usePlayerStore(s => s.volume)
   const isMuted = usePlayerStore(s => s.isMuted)
   const seekNonce = usePlayerStore(s => s.seekNonce)
-  const toggleLyrics = usePlayerStore(s => s.toggleLyrics)
-  const toggleParticle = usePlayerStore(s => s.toggleParticle)
   const toggleQueue = usePlayerStore(s => s.toggleQueue)
 
   /**
@@ -92,8 +90,6 @@ export function PlayerBar({ audio, onAudioElement }: PlayerBarProps) {
       <div className="flex items-center gap-1 md:contents">
         <NowPlaying />
         <div className="flex items-center md:hidden">
-          <PlayerButton icon={Sparkles} label="粒子" onClick={toggleParticle} size="sm" />
-          <PlayerButton icon={Mic2} label="歌词" onClick={toggleLyrics} size="sm" />
           <PlayerButton icon={ListMusic} label="队列" onClick={toggleQueue} size="sm" />
           <MobilePlayerMenu />
         </div>

@@ -30,8 +30,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as THREE from 'three'
 import { COVER_TEXTURE_SIZE, createPlaceholderCover } from './cover-texture'
-import { BASE_FOV, verticalFovForAspect } from './types'
-import type { AudioFeatures, CameraState, ParticleRenderer, ParticleRendererOptions } from './types'
+import { BASE_FOV, DEFAULT_FX, verticalFovForAspect } from './types'
+import type {
+  AudioFeatures,
+  CameraState,
+  FxSettings,
+  ParticleRenderer,
+  ParticleRendererOptions,
+} from './types'
 
 type Any = any
 
@@ -103,9 +109,17 @@ const U = {
   presetBurst: 53,
   tanHalfFov: 54,
   viewportHeightPx: 55,
+  intensity: 56,
+  speed: 57,
+  depth: 58,
+  twist: 59,
+  scatter: 60,
+  bloom: 61,
+  edge: 62,
+  bgFade: 63,
 } as const
 
-const UNIFORM_FLOATS = 56
+const UNIFORM_FLOATS = 64
 
 const WGSL = /* wgsl */ `
 struct Particle {
@@ -145,6 +159,15 @@ struct Uniforms {
   // （占用原本的 padC/padD，不改变结构体大小与既有偏移）
   tanHalfFov: f32,
   viewportHeightPx: f32,
+  // ---- 动效参数（对应 Mineradio 的 fx 滑块，2026-09-14 扩容）----
+  intensity: f32,
+  speed: f32,
+  depth: f32,
+  twist: f32,
+  scatter: f32,
+  bloom: f32,
+  edge: f32,
+  bgFade: f32,
 };
 
 const PI: f32 = 3.141592653589793;
@@ -272,8 +295,9 @@ fn hash11(p: f32) -> f32 {
  * 以及依赖 uCoverRes 的 hiResGuard（无对应设置，等价于取 1）。
  */
 fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
-  let K = 1.36;
-  let t = u.time;
+  // 律动强度：K = intensity * 1.6（其 uIntensity 默认 0.85 → 1.36）
+  let K = u.intensity * 1.6;
+  let t = u.time * u.speed;
   let s = u.preset;
   let plane = u.plane;
   // 其平面坐标由 gx/(grid-1) 生成，等价于 (aUv - 0.5) * PLANE_SIZE
@@ -290,7 +314,8 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
     let bassBreath = snoise(vec3<f32>(c.x * 0.35, c.y * 0.35, t * 0.4)) * u.bass * 0.42 * K;
     // 深度/边缘纹理：R=depth → 浮雕位移（原式 depthZ）
     let depthZ = (textureSampleLevel(u_edgeTex, u_coverSampler,
-      clamp(uv, vec2<f32>(0.0022), vec2<f32>(0.9978)), 0.0).r - 0.5) * 1.40;
+      clamp(uv, vec2<f32>(0.0022), vec2<f32>(0.9978)), 0.0).r - 0.5)
+      * u.depth * 1.40;
     return vec3<f32>(c.x, c.y, midDisp + trebleJ + bassBreath + depthZ);
   }
 
@@ -664,7 +689,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   let rip = rippleSum(p.pos.xy, ro_u);
   // 深度/边缘纹理：G=edge → 发光边强度（原式 edgeBoost）
   let edgeBoost = textureSampleLevel(u_edgeTex, u_coverSampler,
-    clamp(p.uv, vec2<f32>(0.0022), vec2<f32>(0.9978)), 0.0).g;
+    clamp(p.uv, vec2<f32>(0.0022), vec2<f32>(0.9978)), 0.0).g * ro_u.edge;
 
   // ---- 点大小：与 webgl2.ts 同源，采用 Mineradio 的 depthSize = 36/-z 与 1~5px 夹取 ----
   // 上一版用 300/-z、上限 40px（世界单位），sprite 面积差约 8 倍 —— 这是整屏发白的根因。
@@ -790,6 +815,8 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   // 虚空预设（索引 3）：隐去全部预设粒子，只留星河背景。
   // 这是 Mineradio 的 VOID 原始语义；实测把它画成包围相机的壳层会让加法混合整屏曝白。
   if (voidPreset && !isStar) { alpha = 0.0; }
+  // 光晕强度：以默认值 0.62 为 1.0 基准，保证出厂观感不变
+  alpha *= ro_u.bloom / 0.62;
   out.alpha = alpha;
   out.ripple = select(clamp(rip, 0.0, 1.0), 0.0, isStar);
   return out;
@@ -1018,6 +1045,8 @@ export async function createWebGPURenderer(
     let height = 1
     /** 绘制缓冲的像素高度：把像素点大小换算成世界尺寸时用它 */
     let drawHeightPx = 1
+    /** 动效参数（滑杆实时更新） */
+    const fx: FxSettings = { ...DEFAULT_FX }
 
     const writeUniforms = (f: AudioFeatures, c: CameraState) => {
       const sp = Math.sin(c.phi)
@@ -1060,6 +1089,14 @@ export async function createWebGPURenderer(
       // 点大小换算用：tan(垂直 FOV / 2) 与绘制缓冲像素高
       uniformF32[U.tanHalfFov] = Math.tan((camera.fov * Math.PI) / 360)
       uniformF32[U.viewportHeightPx] = drawHeightPx
+      uniformF32[U.intensity] = fx.intensity
+      uniformF32[U.speed] = fx.speed
+      uniformF32[U.depth] = fx.depth
+      uniformF32[U.twist] = fx.twist
+      uniformF32[U.scatter] = fx.scatter
+      uniformF32[U.bloom] = fx.bloom
+      uniformF32[U.edge] = fx.edge
+      uniformF32[U.bgFade] = fx.bgFade
 
       const ripples = f.ripples
       for (let i = 0; i < 4; i++) {
@@ -1122,6 +1159,9 @@ export async function createWebGPURenderer(
       },
       setCoverMix(mix: number) {
         uniformF32[U.coverMix] = Math.max(0, Math.min(1, mix))
+      },
+      setFx(next) {
+        Object.assign(fx, next)
       },
       setSkullPoints(positions) {
         if (!positions || positions.length < 3) return

@@ -40,6 +40,7 @@ import {
   type BackendPreference,
 } from '@/lib/client/particle'
 import type { BackendKind, ParticleRenderer } from '@/lib/client/particle/types'
+import { DEFAULT_FX, type FxSettings } from '@/lib/client/particle/types'
 import { createBeatTracker, type BandFeature } from '@/lib/client/particle/beat'
 import { loadCoverTexture, type CoverTexture } from '@/lib/client/particle/cover-texture'
 import { enhanceCoverDepth } from '@/lib/client/particle/cover-depth-ai'
@@ -69,6 +70,8 @@ export interface ParticleSceneProps {
   paused?: boolean
   /** 后端偏好：auto / webgpu / webgl2 */
   preference?: BackendPreference
+  /** 动效参数（强度/速度/景深/扭曲/离散/光晕/边缘/背景压暗）；来自 FxSettingsStore */
+  fx?: FxSettings
   /** 滚轮回调：滚轮不控制镜头，转交外层菜单滑块。 */
   onWheelMenu?: (deltaY: number) => void
   /** 后端就绪回调（供 UI 显示当前渲染后端）。 */
@@ -127,12 +130,13 @@ const SKULL_PRESET = 6
 
 const PRESET_KEEP_CAMERA = 5
 
-/** 相机限制：对齐 Mineradio 的 minPhi/maxPhi/minRadius/maxRadius（同样要换算 φ）。 */
+/** 相机限制：对齐 Mineradio 的 minPhi/maxPhi/minRadius/maxRadius（同样要换算 φ）。
+ *  RADIUS_MAX 放大 100×：允许用户用 Alt+右键/滚轮大幅拉远镜头，避免在较大粒子上"顶死"。 */
 const PHI_ELEVATION_LIMIT = Math.PI * 0.45
 const PHI_MIN = Math.PI / 2 - PHI_ELEVATION_LIMIT
 const PHI_MAX = Math.PI / 2 + PHI_ELEVATION_LIMIT
 const RADIUS_MIN = 2.4
-const RADIUS_MAX = 14.0
+const RADIUS_MAX = 14.0 * 100  // 1400
 
 export function ParticleScene({
   audio = null,
@@ -145,6 +149,7 @@ export function ParticleScene({
   pointSize = 1,
   paused = false,
   preference = 'auto',
+  fx = DEFAULT_FX,
   onWheelMenu,
   onBackend,
   onError,
@@ -163,10 +168,23 @@ export function ParticleScene({
   const coverEpochRef = useRef(0)
   /** 骷髅点云是否已加载过（避免重复 fetch）。 */
   const skullLoadedRef = useRef(false)
+  /** 当前动效参数：每次 `fx` prop 变化都更新这里，渲染循环读取它。 */
+  const fxRef = useRef<FxSettings>(fx)
+  fxRef.current = fx
 
   /** 供事件回调与渲染循环读取的最新值，避免重建场景。 */
   const liveRef = useRef({ isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset })
   liveRef.current = { isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset }
+
+  /**
+   * 监听 FxSettings 变化 → 实时下发给渲染器。
+   * 独立 effect：只在 renderer 就绪（rendererRef.current 变化）且 fx 变化时触发，
+   * 避免在场景初始化前空跑。
+   */
+  useEffect(() => {
+    if (!rendererRef.current) return
+    rendererRef.current.setFx(fx)
+  }, [fx])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -538,14 +556,51 @@ export function ParticleScene({
           // 静息时极缓慢自转，避免画面完全静止
           if (mode === 'none' && touchMode === 'none') rig.theta += 0.00035
 
+          // ---- 频谱响应整形：逐式对齐 Mineradio 的 11-main-loop 管线 ----
+          // 其送进着色器的并不是原始分析值，而是经过「缩放 + 上限 + 预设分组压缩」后的值，
+          // 有效幅度只有原始值的 30%~50%。此前直接传原始值，导致律动明显过大。
+          const FX_INTENSITY = 0.85 // 对应其「律动强度」滑块默认值
+          const c01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
+          let aBass = Math.min(0.9, frame.bass * 1.05 + frame.pulse * 0.18) * FX_INTENSITY
+          let aMid = Math.min(0.72, frame.mid * 1.12) * FX_INTENSITY
+          let aTreble = Math.min(0.62, frame.treble * 1.2) * FX_INTENSITY
+          let aBeat = frame.pulse
+          const aEnergy = Math.max(frame.energy, frame.pulse * 0.3)
+          if (nextPreset >= 4) {
+            const isWallpaper = nextPreset === 5
+            const isAuthored = nextPreset >= 9 && nextPreset <= 12
+            const bg = isWallpaper ? 1.1 : isAuthored ? 1.32 : 1.58
+            const mg = isWallpaper ? 1.16 : isAuthored ? 1.48 : 1.82
+            const tg = isWallpaper ? 1.34 : isAuthored ? 1.72 : 2.28
+            const qg = isWallpaper ? 0.18 : isAuthored ? 0.31 : 0.42
+            const ringBass =
+              frame.bass * bg + frame.pulse * qg - frame.mid * 0.16 - frame.treble * 0.06
+            const ringMid = frame.mid * mg - frame.bass * 0.14 - frame.treble * 0.07
+            const ringTreble = frame.treble * tg - frame.mid * 0.1 - frame.bass * 0.05
+            aBass = Math.pow(c01((ringBass - 0.05) / 0.58), 0.72) * FX_INTENSITY
+            aMid = Math.pow(c01((ringMid - 0.045) / 0.46), 0.78) * FX_INTENSITY
+            aTreble = Math.pow(c01((ringTreble - 0.03) / 0.34), 0.84) * FX_INTENSITY
+            if (isWallpaper) {
+              aBass = Math.min(aBass, 0.46 * FX_INTENSITY)
+              aMid = Math.min(aMid, 0.4 * FX_INTENSITY)
+              aTreble = Math.min(aTreble, 0.36 * FX_INTENSITY)
+              aBeat *= 0.34
+            } else if (isAuthored) {
+              aBass = Math.min(aBass, 0.72 * FX_INTENSITY)
+              aMid = Math.min(aMid, 0.62 * FX_INTENSITY)
+              aTreble = Math.min(aTreble, 0.58 * FX_INTENSITY)
+              aBeat *= 0.72
+            }
+          }
+
           renderer?.update(
             {
               time: (now - start) / 1000,
-              bass: frame.bass,
-              mid: frame.mid,
-              treble: frame.treble,
-              energy: frame.energy,
-              pulse: frame.pulse,
+              bass: aBass,
+              mid: aMid,
+              treble: aTreble,
+              energy: aEnergy,
+              pulse: aBeat,
               ripples: frame.ripples,
             },
             { radius: rig.radius, theta: rig.theta, phi: rig.phi, target: rig.target },

@@ -333,9 +333,20 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
       }, 0)
       return
     }
-    // 顺序播放 / 随机：播完当前曲统一走 next()；
-    // 顺序播放到末尾由 next() 的 (currentIndex+1)%length 回绕到第一首（整列循环），不再停止。
+    // 列表循环 / 随机：播完当前曲统一走 next()；
+    // 列表循环到末尾由 next() 的 (currentIndex+1)%length 回绕到第一首，不再停止。
+    //
+    // 与单曲循环同源的坑：onEnded 已先 onPlayState(false) 把 isPlaying 置 false，
+    // 而 next() 只切歌 + 重新拉流，不会回写 isPlaying，
+    // 于是监听 isPlaying 的播放 effect 收不到变化 → 引擎不会 play() 新歌
+    // （表现为「列表循环时播完最后一首就停住」）。
+    // 这里同样制造一次 false→true 过渡：先显式置 false（确保与上一渲染值不同），
+    // 再用【宏任务】置回 true，跨过一次完整 render+commit，effect 必然触发 play()。
+    set({ isPlaying: false })
     get().next()
+    setTimeout(() => {
+      set({ isPlaying: true })
+    }, 0)
   },
 
   /** 加入队列（Play Later 语义）：排到插播队列末尾，整体优先于主队列剩余歌曲。

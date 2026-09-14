@@ -118,3 +118,76 @@ curl -s -o /dev/null -w '%{http_code}\n' http://<NAS 的 IP>:3099/api/status
 | 更新后界面没变化 | 浏览器强刷（Ctrl/Cmd+Shift+R）；确认 `/api/status` 非 404 |
 | 提示权限不足 | 检查 `prisma_data` 目录对容器用户可写（群晖上通常用 `Everyone` 读写或 `PUID/PGID` 对齐） |
 | 桌面端（Windows exe） | 在 GitHub Release 的 `desktop-latest` 中取安装包；版本号固定 0.0.1 |
+
+---
+
+## 8. 让浏览器用上 WebGPU（粒子界面）
+
+粒子界面优先走 **WebGPU（Compute Shader）**，不支持时自动降级 **WebGL 2.0**。
+但浏览器的规范限制是：**`navigator.gpu` 只在安全上下文（HTTPS 或 localhost）下才存在**。
+用 `http://<NAS的IP>:3099` 这类地址访问时，WebGPU API 根本不会暴露，因此必然降级 ——
+这与代码无关。
+
+界面上可以随时确认：歌词面板粒子界面右上角会显示 **绿色 WebGPU** 或灰色 **WebGL 2.0** 徽标。
+
+### 方式一：Chrome / Edge 把该来源标记为「安全」（最快，无需改动部署）
+
+1. 浏览器打开 `chrome://flags/#unsafely-treat-insecure-origin-as-secure`（Edge 同地址）
+2. 在下拉框里填入你的访问地址，例如 `http://192.168.1.10:3099`
+3. 把它设为 **Enabled**，按提示重启浏览器
+4. 重新打开粒子界面 → 徽标应变为 WebGPU
+
+> 仅对本机浏览器生效；Safari / iOS 没有等价开关。
+
+### 方式二：用 localhost 访问（SSH 端口转发）
+
+```bash
+# 在你自己的电脑上执行，把 NAS 的 3099 映射到本机 localhost:3099
+ssh -L 3099:localhost:3099 用户名@NAS地址
+# 然后浏览器打开
+http://localhost:3099
+```
+
+localhost 天然属于安全上下文 → 直接可用 WebGPU。适合临时验证。
+
+### 方式三：给 NAS 配 HTTPS（推荐长期方案）
+
+群晖「控制面板 → 登录门户 → 高级 → 反向代理」新增一条：
+
+- 来源：`HTTPS` / 端口 `3443`（或你已有的证书域名）
+- 目标：`HTTP` / `localhost` / 端口 `3099`
+
+再配 Let's Encrypt 证书（或群晖自带的自签证书）。之后用 `https://域名` 访问即可，
+手机 Safari、iPad 也会一并获得 WebGPU（iOS 26+ 支持）。
+
+### 方式四：Tauri 桌面端（无需任何配置）
+
+桌面端页面地址是 `http://localhost`，本身就在安全上下文里 ——
+**桌面粒子壁纸 / 悬浮歌词默认就会走 WebGPU**，这是验证 WebGPU 版本最直接的场合。
+
+### Firefox 的情况（2026-09 现状）
+
+Firefox 的 WebGPU 已进入「桌面基本齐全」状态，但**分平台**：
+
+| 平台 | 状态 |
+|---|---|
+| Windows | 自 **Firefox 141** 起默认开启 |
+| Apple Silicon Mac | 自 **Firefox 145** 起默认开启 |
+| Intel Mac | 未默认开启（需 flag） |
+| Linux | 仍在推进中，需在 about:config 打开 `dom.webgpu.enabled` |
+| Android | 仍在 flag 后面，预计 2026 年内 |
+
+**同样受安全上下文限制**：用 `http://<局域网IP>:3099` 访问时，Firefox 一样不会暴露
+`navigator.gpu` —— 这条规则所有浏览器都一样，与浏览器品牌无关。
+
+Firefox 的对等做法（相当于 Chrome 的 unsafely-treat-insecure-origin-as-secure）：
+
+1. 地址栏打开 `about:config`，接受风险提示
+2. 搜索 `securecontext`
+   - 新版是 `dom.securecontext.allowlist`
+   - 旧版是 `dom.securecontext.whitelist`
+3. 值填**主机名（不带端口、不带协议）**，例如 `192.168.1.10`；多个用逗号分隔
+4. 重启浏览器 → 该来源被视为安全上下文 → WebGPU 可用
+
+> 结论：最省事的仍是 **HTTPS 反代** 或 **localhost**（见方式二/三），
+> 这两种对所有浏览器一次到位，不用逐浏览器改 settting。

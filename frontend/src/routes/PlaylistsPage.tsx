@@ -21,6 +21,7 @@ import { EditPlaylistDialog } from '@@/components/playlists/EditPlaylistDialog'
 import { PlaylistGrid } from '@@/components/playlists/PlaylistGrid'
 import { useDownloadQueue } from '@/hooks/useDownloadQueue'
 import { toast } from '@/lib/toast'
+import { usePlayerStore } from '@/lib/store/player-store'
 
 // 歌单导入导出数据结构
 interface ExportedPlaylistData {
@@ -42,6 +43,12 @@ export function PlaylistsPage() {
 
   // 下载队列（第 14 项：下载全部未下载歌曲）
   const queue = useDownloadQueue()
+
+  // 直接播放本地音乐文件（绕过 UID 链路）
+  const playLocalFile = (name: string) => {
+    const url = `/api/local-music/play?name=${encodeURIComponent(name)}`
+    usePlayerStore.setState({ streamUrl: url, isPlaying: true, currentTrack: null, bufferProgress: null })
+  }
 
   // 本地音乐（第 12 项：浏览 NAS 落盘目录）
   interface LocalFile {
@@ -335,7 +342,7 @@ export function PlaylistsPage() {
                 key={f.name}
                 className="flex items-center gap-3 px-3 py-2 text-sm"
               >
-                <Music4 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <Music4 className="h-4 w-4 shrink-0 text-primary" />
                 <span className="min-w-0 flex-1 truncate" title={f.name}>
                   {f.name}
                 </span>

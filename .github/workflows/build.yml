@@ -1,82 +1,39 @@
-name: Build and Publish Docker Image
+name: Build and Release Docker Image
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main, master]
-    tags: ['v*']
+    tags:
+      - 'v*'
 
-env:
-  REGISTRY: ghcr.io
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
-    permissions:
-      # contents: write —— 上传离线安装包到 GitHub Release（gh release create）必需；
-      # 只给 read 时会报 HTTP 403: Resource not accessible by integration
-      contents: write
-      packages: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
-      # GHCR 要求镜像仓库名必须全小写，
-      # 而 github.repository 可能含大写（如 RiggestOu/HollyMusic_Docker_LXMusic）
-      - name: Compute lowercase image name
-        id: prep
-        run: echo "image_name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          # 同一个包下会产生 3 个 tag（不会新增"包"，只新增"版本"）：
-          #   latest        —— 永远指向最新构建
-          #   <commit-sha>  —— 精确锁定某次提交，便于回滚排查
-          #   build-<N>     —— 递增且好认，每次推送都会多一条
-          tags: |
-            ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:latest
-            ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:build-${{ github.run_number }}
-          platforms: linux/amd64
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-
-      # ---------- 离线安装包：docker save -> zip -> GitHub Release ----------
-      # 用途：NAS 直连 GHCR 拉取被重置（connection reset）时的替代安装方式。
-      # 固定发布到预发布版 "image-latest"，每次构建覆盖更新（不刷爆 Release 列表），
-      # 下载地址恒定为:
-      #   https://github.com/<owner>/<repo>/releases/download/image-latest/hollymusic-image-latest.zip
-      # NAS 上使用: 解压得到 image.tar -> docker load -i image.tar -> docker compose up -d
-      - name: Package image (save + zip)
+      - name: Build Docker image
         run: |
-          IMAGE="${REGISTRY}/${{ steps.prep.outputs.image_name }}:latest"
-          docker pull "$IMAGE"
-          docker save "$IMAGE" -o image.tar
-          zip -q hollymusic-image-latest.zip image.tar
-          ls -lh hollymusic-image-latest.zip
+          docker build -t hollymusic_docker_lxmusic:latest .
 
-      - name: Upload image zip to GitHub Release (image-latest)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Save Docker image as tar.gz
         run: |
-          # 删掉旧的预发布与同名 tag，重新创建（附件同名覆盖最可靠的方式）
-          gh release delete image-latest --cleanup-tag --yes || true
-          gh release create image-latest hollymusic-image-latest.zip \
-            --title "Docker image tarball (latest build)" \
-            --notes "NAS 直连 GHCR 拉取失败时的离线安装包（每次 push 自动更新）。用法：下载解压得到 image.tar，SSH 到 NAS 执行 docker load -i image.tar，然后 docker compose up -d。" \
-            --prerelease
+          docker save hollymusic_docker_lxmusic:latest | gzip > hollymusic_docker_lxmusic-latest.tar.gz
+          ls -lh hollymusic_docker_lxmusic-latest.tar.gz
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: HollyMusic Docker Image latest
+          files: hollymusic_docker_lxmusic-latest.tar.gz
+          overwrite_files: true
+          generate_release_notes: true

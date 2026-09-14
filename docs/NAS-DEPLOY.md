@@ -2,7 +2,9 @@
 
 > 适用：群晖 DSM（Container Manager / 套件版 Docker）、以及任何支持 Compose 的 NAS 或 Linux 主机。
 >
-> 相关文件：`docker-compose.yml`、`Dockerfile`、`.env`。镜像由 GitHub Actions 推送到 GHCR。
+> 相关文件：`docker-compose.yml`、`Dockerfile`、`.env`。
+> 镜像通过 GitHub Actions 构建后上传至 GitHub Releases，用户手动下载后用 `docker load` 导入，
+> 本地启动时 `pull_policy: never` 禁止从网络拉取。
 
 ---
 
@@ -25,10 +27,10 @@
 ```yaml
 services:
   hollymusic:
-    image: ghcr.io/riggestou/hollymusic_docker_lxmusic:latest
+    image: hollymusic_docker_lxmusic:latest
     container_name: hollymusic
-    # 关键：latest 必须每次拉取，否则本地有旧镜像时不会更新
-    pull_policy: always
+    # 镜像从 GitHub Releases 手动下载导入，本地已有，禁止从网络拉取
+    pull_policy: never
     restart: unless-stopped
     ports:
       - '3099:3000'
@@ -36,8 +38,6 @@ services:
       - .env
     volumes:
       - ./prisma_data:/app/prisma/prisma/data
-      # 自定义粒子图片（第 5 项完成后启用）
-      # - ./uploads:/app/uploads
 ```
 
 `.env` 至少包含：
@@ -66,12 +66,15 @@ docker compose logs -f --tail=100 hollymusic
 
 ```bash
 cd /docker/hollymusic
-docker compose pull          # 拉最新镜像
-docker compose up -d         # 重建并替换容器
-docker image prune -f        # 可选：清理旧镜像释放空间
+# 从 GitHub Releases 下载最新镜像包
+wget https://github.com/RiggestOu/HollyMusic_Docker_LXMusic/releases/download/latest/hollymusic_docker_lxmusic-latest.tar.gz
+# 导入镜像
+docker load -i hollymusic_docker_lxmusic-latest.tar.gz
+# 重启容器（使用本地镜像，不拉取网络）
+docker compose up -d
 ```
 
-**不要用 GUI 的「重新启动容器」来代替更新**——它只是重启现有容器，不会重新拉取镜像。
+**不要用 GUI 的「重新启动容器」来代替更新**——它只是重启现有容器，不会更新镜像。
 
 判断到底有没有更新成功，用这个决定性检查：
 
@@ -91,25 +94,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://<NAS 的 IP>:3099/api/status
 
 ---
 
-## 6. 无法直连 GHCR 时的离线导入
-
-若 NAS 访问 `ghcr.io` 被重置或限速，可用 GitHub Release 上的固定预发布 **image-latest**
-（内含 `docker save` 出的 tar 包）：
-
-1. 在能联网的机器上下载 `hollymusic-image-latest.zip`，解压得到 tar。
-2. 传到 NAS 后导入：
-
-   ```bash
-   docker load -i hollymusic-image-latest.tar
-   docker images | grep hollymusic   # 确认镜像已存在
-   ```
-
-3. 把 compose 里的 `pull_policy: always` 临时改为 `pull_policy: never`，
-   或给镜像打上 `:latest` 标签后 `docker compose up -d`。
-
----
-
-## 7. 常见问题
+## 6. 常见问题
 
 | 现象 | 排查 |
 |---|---|
@@ -118,10 +103,6 @@ curl -s -o /dev/null -w '%{http_code}\n' http://<NAS 的 IP>:3099/api/status
 | 更新后界面没变化 | 浏览器强刷（Ctrl/Cmd+Shift+R）；确认 `/api/status` 非 404 |
 | 提示权限不足 | 检查 `prisma_data` 目录对容器用户可写（群晖上通常用 `Everyone` 读写或 `PUID/PGID` 对齐） |
 | 桌面端（Windows exe） | 在 GitHub Release 的 `desktop-latest` 中取安装包；版本号固定 0.0.1 |
-
----
-
-## 8. 让浏览器用上 WebGPU（粒子界面）
 
 粒子界面优先走 **WebGPU（Compute Shader）**，不支持时自动降级 **WebGL 2.0**。
 但浏览器的规范限制是：**`navigator.gpu` 只在安全上下文（HTTPS 或 localhost）下才存在**。

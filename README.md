@@ -1,31 +1,40 @@
-# HollyMudic - Docker Music Player
+# HollyMusic - Docker Music Player
 
 基于 LX Music 音源加载逻辑的 Docker 化音乐播放器。
 
 ## 快速开始
 
-```bash
-# 安装依赖
-npm install
+### Docker 部署
 
-# 开发模式
-npm run dev
-
-# 构建
-npm run build
-
-# Docker 部署
-npm run docker:build
-npm run docker:run
-```
-
-## Docker 部署
+#### 方式一：在线安装（需能访问 GHCR）
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
-访问 http://localhost:3080
+访问 http://localhost:3099
+
+#### 方式二：离线安装（NAS 无法直连 GHCR 时使用）
+
+1. 打开 [GitHub Releases](https://github.com/RiggestOu/HollyMusic_Docker_LXMusic/releases) 页面，下载 `hollymusic_docker_lxmusic-latest.tar.gz`
+2. 上传到本地或 NAS
+3. 导入镜像：
+
+   ```bash
+   docker load -i hollymusic_docker_lxmusic-latest.tar.gz
+   ```
+
+4. 确认镜像存在：
+
+   ```bash
+   docker images | grep hollymusic_docker_lxmusic
+   ```
+
+5. 使用 `docker compose up -d` 启动
+
+如需更新，重新下载新包并再次 `docker load`，然后重启 Compose。
+
+> 注意：`pull_policy: never` 要求 Docker Compose v2 或更高版本。检查版本：`docker compose version`
 
 ## 功能特性
 

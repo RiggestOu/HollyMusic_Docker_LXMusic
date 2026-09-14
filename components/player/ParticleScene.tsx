@@ -293,7 +293,7 @@ export function ParticleScene({
       freqData = new Uint8Array(n)
       // 频段 bin 边界：按真实采样率/fftSize 映射 Mineradio 的频率分区
       // （bass 40-420Hz / mid 2600-6200Hz / treble 6200Hz+，对齐 11-main-loop.js:368-390）
-      const sr = p.analyser.sampleRate || 44100
+      const sr = p.context.sampleRate || 44100
       const fft = p.analyser.fftSize || n * 2
       const hzPerBin = sr / fft
       const binOf = (hz: number) => Math.max(0, Math.min(n - 1, Math.round(hz / hzPerBin)))

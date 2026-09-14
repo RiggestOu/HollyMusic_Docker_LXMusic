@@ -8,6 +8,7 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import type { BackendPreference } from '@/lib/client/particle'
+import { TUNING_KEYS, type TuningKey } from '@/lib/client/particle/types'
 
 export interface FxSettings {
   intensity: number
@@ -18,6 +19,20 @@ export interface FxSettings {
   bloom: number
   edge: number
   bgFade: number
+  // 实验调参（默认值须与 lib/client/particle/types.ts 的 DEFAULT_FX 保持一致）
+  spectrumAmp: number
+  flowBase: number
+  flowBass: number
+  flowMid: number
+  rippleAmp: number
+  pulseBase: number
+  pulseBass: number
+  burstAmp: number
+  reliefAmp: number
+  sizeBase: number
+  sizeMax: number
+  brightBase: number
+  alphaBase: number
 }
 
 export const DEFAULT_FX: FxSettings = {
@@ -29,6 +44,61 @@ export const DEFAULT_FX: FxSettings = {
   bloom: 0.62,
   edge: 1,
   bgFade: 0.2,
+  spectrumAmp: 0.01,
+  flowBase: 0.55,
+  flowBass: 1.6,
+  flowMid: 0.65,
+  rippleAmp: 1.3,
+  pulseBase: 0.45,
+  pulseBass: 0.9,
+  burstAmp: 1.6,
+  reliefAmp: 1.0,
+  sizeBase: 36.0,
+  sizeMax: 4.95,
+  brightBase: 0.82,
+  alphaBase: 0.55,
+}
+
+/** 各调参项的钳位范围（防止极端值把着色器搞废）。 */
+const TUNING_RANGE: Record<TuningKey, [number, number]> = {
+  spectrumAmp: [0, 2],
+  flowBase: [0, 5],
+  flowBass: [0, 5],
+  flowMid: [0, 5],
+  rippleAmp: [0, 8],
+  pulseBase: [0, 5],
+  pulseBass: [0, 5],
+  burstAmp: [0, 10],
+  reliefAmp: [0, 3],
+  sizeBase: [1, 120],
+  sizeMax: [0.5, 20],
+  brightBase: [0, 3],
+  alphaBase: [0, 1],
+}
+
+export type TuningEnabled = Record<TuningKey, boolean>
+
+/** 调参开关默认全部打开（即默认值生效）。 */
+function defaultTuningEnabled(): TuningEnabled {
+  const out = {} as TuningEnabled
+  for (const k of TUNING_KEYS) out[k] = true
+  return out
+}
+
+/**
+ * 把「开关关闭」的调参项按 0 下发，便于逐个隔离定位是哪个参数在影响观感。
+ * 注意：只影响下发给渲染器的副本，不动用户设定的原值，重新打开即可恢复。
+ */
+export function resolveFx(fx: FxSettings, enabled: TuningEnabled): FxSettings {
+  let dirty = false
+  const out = { ...fx }
+  for (const k of TUNING_KEYS) {
+    if (!enabled[k] && out[k] !== 0) {
+      out[k] = 0
+      dirty = true
+    }
+  }
+  return dirty ? out : fx
 }
 
 const STORAGE_KEY = 'hm-fx-settings'
@@ -75,7 +145,10 @@ function savePreference(pref: BackendPreference): void {
 interface FxSettingsState {
   fx: FxSettings
   backendPreference: BackendPreference
+  /** 实验调参的开关状态：关闭的项按 0 下发给渲染器（原值保留，重开即恢复）。 */
+  tuningEnabled: TuningEnabled
   update: (partial: Partial<FxSettings>) => void
+  toggleTuning: (key: TuningKey, on: boolean) => void
   reset: () => void
   setBackendPreference: (pref: BackendPreference) => void
 }
@@ -92,6 +165,7 @@ export const useFxSettingsStore = create<FxSettingsState>()(
   subscribeWithSelector((set) => ({
     fx: loadStored() ?? { ...DEFAULT_FX },
     backendPreference: loadStoredPreference(),
+    tuningEnabled: defaultTuningEnabled(),
     update: (partial) =>
       set((s) => {
         const next = { ...s.fx, ...partial }
@@ -104,6 +178,11 @@ export const useFxSettingsStore = create<FxSettingsState>()(
         next.bloom = Math.max(0, Math.min(3.0, next.bloom))
         next.edge = Math.max(0, Math.min(3.0, next.edge))
         next.bgFade = Math.max(0, Math.min(2.0, next.bgFade))
+        // 实验调参项：按各自区间钳位
+        for (const k of TUNING_KEYS) {
+          const [lo, hi] = TUNING_RANGE[k]
+          next[k] = Math.max(lo, Math.min(hi, next[k]))
+        }
         persist(next)
         // 广播，让同时打开的 Tauri 歌词窗口同步
         if (typeof window !== 'undefined') {
@@ -111,12 +190,19 @@ export const useFxSettingsStore = create<FxSettingsState>()(
         }
         return { fx: next }
       }),
+    toggleTuning: (key, on) => {
+      set((s) => ({ tuningEnabled: { ...s.tuningEnabled, [key]: on } }))
+      // 让 Tauri 歌词窗口等同屏实例同步
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('hm-fx-changed'))
+      }
+    },
     reset: () => {
       persist(DEFAULT_FX)
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('hm-fx-changed'))
       }
-      set({ fx: { ...DEFAULT_FX } })
+      set({ fx: { ...DEFAULT_FX }, tuningEnabled: defaultTuningEnabled() })
     },
     setBackendPreference: (pref: BackendPreference) => {
       savePreference(pref)

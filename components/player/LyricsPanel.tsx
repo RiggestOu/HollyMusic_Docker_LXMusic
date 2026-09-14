@@ -1,9 +1,9 @@
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlayerStore } from '@/lib/store/player-store'
 import { useFavoritesStore } from '@/lib/store/favorites-store'
 import { useDownload } from '@/hooks/useDownload'
-import { useFxSettingsStore } from '@/lib/store/fx-settings-store'
+import { useFxSettingsStore, resolveFx } from '@/lib/store/fx-settings-store'
 import {
   PRESETS,
   PRESET_CHANGED_EVENT,
@@ -21,6 +21,7 @@ import { CoverImage } from '@/components/shared/CoverImage'
 import { AudioSpectrum } from './AudioSpectrum'
 import { ParticleScene } from './ParticleScene'
 import { ParticleSettingsPanel } from './FxSettingsPanel'
+import { ParticleTuningPanel } from './ParticleTuningPanel'
 import type { LucideIcon } from 'lucide-react'
 import {
   Play,
@@ -38,6 +39,7 @@ import {
   Download,
   X,
   Settings,
+  FlaskConical,
 } from 'lucide-react'
 
 interface LyricsPanelProps {
@@ -105,8 +107,16 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
   const [backend, setBackend] = useState<string | null>(null)
   /** 粒子设置面板（预设 + 动效统一）开合 */
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** 实验调参面板（debug 专用，独立于设置面板） */
+  const [tuningOpen, setTuningOpen] = useState(false)
   /** 当前动效参数（来自全局 store，滑动实时同步） */
   const fx = useFxSettingsStore(s => s.fx)
+  const tuningEnabled = useFxSettingsStore(s => s.tuningEnabled)
+  /**
+   * 下发给渲染器的实际参数：把「实验调参」里被关掉的项按 0 传下去，
+   * 便于逐个隔离定位是哪个参数在影响观感（原值保留在 store，重开即恢复）。
+   */
+  const fxEffective = useMemo(() => resolveFx(fx, tuningEnabled), [fx, tuningEnabled])
   /** 后端偏好（来自全局 store，用户可在设置面板切换） */
   const backendPreference = useFxSettingsStore(s => s.backendPreference)
   const applyPreset = (index: number) => {
@@ -238,7 +248,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           isPlaying={isPlaying}
           preset={preset}
           preference={backendPreference}
-          fx={fx}
+          fx={fxEffective}
           coverUrl={
             loadStoredCustomImage() ??
             (track ? buildCoverUrl(track.uid, track.musicInfo.img) : null)
@@ -629,11 +639,23 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
             <Settings className="h-4 w-4" />
             <span>设置</span>
           </button>
+          {/* debug：实验调参面板入口（独立面板，默认不打扰普通用户） */}
+          <button
+            onClick={() => setTuningOpen(true)}
+            className="touch-target flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            title="实验调参（debug）：实时调节粒子物理/尺寸/亮度参数"
+            aria-label="打开实验调参面板"
+          >
+            <FlaskConical className="h-4 w-4" />
+            <span>调参</span>
+          </button>
         </div>
       </div>
 
       {/* 粒子设置抽屉（含视觉预设 + 动效参数标签页，覆盖在 dialog 之上） */}
       <ParticleSettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {/* 实验调参抽屉（debug，仅由「调参」按钮打开） */}
+      <ParticleTuningPanel open={tuningOpen} onClose={() => setTuningOpen(false)} />
     </div>
   )
 }

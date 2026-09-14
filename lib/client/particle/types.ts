@@ -76,6 +76,37 @@ export interface FxSettings {
   edge: number
   /** 背景压暗 0~1.2，默认 0.20 */
   bgFade: number
+
+  // ---- 实验调参（2026-09-15 新增）----
+  // 下面这些原本是**硬编码在着色器里**的常数，无法实时调节，排查「到底是哪个参数在影响观感」
+  // 只能反复改代码 + 重新构建。现统一提升为 uniform 暴露到「实验调参」面板。
+  // 默认值 = 着色器里原来的字面量（即当前观感不变），因此加这些字段不会改变默认效果。
+  /** 频谱振幅总倍率：bass/mid/treble 进入着色器前的缩放。1 = 原始强度 */
+  spectrumAmp: number
+  /** 流场位移基数（webgl2 flowAmp 的常数项） */
+  flowBase: number
+  /** 流场位移·低频系数 */
+  flowBass: number
+  /** 流场位移·中频系数 */
+  flowMid: number
+  /** 涟漪抬升位移 */
+  rippleAmp: number
+  /** 节拍跳动位移基数（配合 pulseBass） */
+  pulseBase: number
+  /** 节拍跳动位移·低频系数 */
+  pulseBass: number
+  /** 预设切换爆散位移 */
+  burstAmp: number
+  /** 封面形态 Z 浮雕强度倍率 */
+  reliefAmp: number
+  /** 点尺寸基数（Mineradio depthSize = 36 / 视深） */
+  sizeBase: number
+  /** 点尺寸上限（px） */
+  sizeMax: number
+  /** 亮度基数（vBright 的常数项） */
+  brightBase: number
+  /** 透明度基数（alpha 的常数项） */
+  alphaBase: number
 }
 
 export const DEFAULT_FX: FxSettings = {
@@ -87,6 +118,59 @@ export const DEFAULT_FX: FxSettings = {
   bloom: 0.62,
   edge: 1,
   bgFade: 0.2,
+  // 实验调参默认值（= 原着色器字面量）
+  spectrumAmp: 0.01,
+  flowBase: 0.55,
+  flowBass: 1.6,
+  flowMid: 0.65,
+  rippleAmp: 1.3,
+  pulseBase: 0.45,
+  pulseBass: 0.9,
+  burstAmp: 1.6,
+  reliefAmp: 1.0,
+  sizeBase: 36.0,
+  sizeMax: 4.95,
+  brightBase: 0.82,
+  alphaBase: 0.55,
+}
+
+/**
+ * 上述「实验调参」键名，供面板渲染开关与滑杆、以及 store 做归零解析。
+ * 关掉某个开关 → 该参数按 0 下发给着色器（用于逐个隔离定位是哪个参数在影响观感）。
+ */
+export const TUNING_KEYS = [
+  'spectrumAmp',
+  'flowBase',
+  'flowBass',
+  'flowMid',
+  'rippleAmp',
+  'pulseBase',
+  'pulseBass',
+  'burstAmp',
+  'reliefAmp',
+  'sizeBase',
+  'sizeMax',
+  'brightBase',
+  'alphaBase',
+] as const
+
+export type TuningKey = (typeof TUNING_KEYS)[number]
+
+/** 调参项元信息：滑杆范围与说明（面板与默认值共用一套，避免两处漂移）。 */
+export const TUNING_META: Record<TuningKey, { label: string; min: number; max: number; step: number; desc: string }> = {
+  spectrumAmp: { label: '频谱振幅', min: 0, max: 2, step: 0.01, desc: 'bass/mid/treble 总倍率，关掉=完全不受音乐影响' },
+  flowBase: { label: '流场·基数', min: 0, max: 5, step: 0.01, desc: '流场位移常数项，关掉=无流动' },
+  flowBass: { label: '流场·低频', min: 0, max: 5, step: 0.01, desc: '流场位移中 bass 的系数' },
+  flowMid: { label: '流场·中频', min: 0, max: 5, step: 0.01, desc: '流场位移中 mid 的系数' },
+  rippleAmp: { label: '涟漪抬升', min: 0, max: 8, step: 0.01, desc: '点击涟漪的 Z 轴抬升量' },
+  pulseBase: { label: '节拍·基数', min: 0, max: 5, step: 0.01, desc: '每拍径向跳动的基础位移' },
+  pulseBass: { label: '节拍·低频', min: 0, max: 5, step: 0.01, desc: '节拍跳动中 bass 的系数' },
+  burstAmp: { label: '切换爆散', min: 0, max: 10, step: 0.01, desc: '切预设时向外炸开的位移' },
+  reliefAmp: { label: '封面浮雕', min: 0, max: 3, step: 0.01, desc: '封面形态 Z 轴浮雕/呼吸强度' },
+  sizeBase: { label: '点尺寸·基数', min: 1, max: 120, step: 0.5, desc: 'Mineradio 原式 36 / 视深' },
+  sizeMax: { label: '点尺寸·上限', min: 0.5, max: 20, step: 0.05, desc: '粒子像素直径上限' },
+  brightBase: { label: '亮度·基数', min: 0, max: 3, step: 0.01, desc: 'vBright 常数项' },
+  alphaBase: { label: '透明度·基数', min: 0, max: 1, step: 0.01, desc: 'alpha 常数项' },
 }
 
 export interface ParticleRendererOptions {

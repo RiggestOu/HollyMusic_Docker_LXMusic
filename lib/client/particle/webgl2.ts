@@ -29,7 +29,7 @@
 import * as THREE from 'three'
 import { COVER_TEXTURE_SIZE, createPlaceholderCover } from './cover-texture'
 import { BASE_FOV, DEFAULT_FX, verticalFovForAspect } from './types'
-import type { AudioFeatures, CameraState, ParticleRenderer, ParticleRendererOptions } from './types'
+import type { AudioFeatures, CameraState, FxSettings, ParticleRenderer, ParticleRendererOptions } from './types'
 
 /** 与 WGSL 路径一致的配色（香槟金 / 薄荷绿 / 近黑）。 */
 const COLOR_CHAMPAGNE = new THREE.Color('#F7E7CE')
@@ -50,17 +50,6 @@ const DEFAULT_STAR_COUNT = 1400
 /** 涟漪寿命，必须与 beat.ts 的 RIPPLE_LIFE 一致。 */
 const RIPPLE_LIFE = 2.0
 
-/**
- * 频谱驱动振幅倍率：bass/mid/treble 送进着色器前的整体缩放。
- * 1.0 = 原始强度；0.01 = 频谱对粒子的位移/加速度影响降为**百分之一**
- * （2026-09-15 用户两次要求各降十分之一：0.1 → 0.01）。
- * 只作用于 bass/mid/treble（频谱），**不缩放 energy/pulse**：
- *   · energy 参与 alpha 与亮度，一并缩小会让粒子整体变暗变透，超出「降振幅」范围；
- *   · pulse 是节拍冲量（beat），不是频谱。
- * webgpu.ts 有同名同值常量，调参时两处需同步。
- */
-const SPECTRUM_AMPLITUDE = 0.01
-
 const VERTEX_SHADER = /* glsl */ `
   precision highp float;
 
@@ -73,6 +62,10 @@ const VERTEX_SHADER = /* glsl */ `
   uniform float uPointSize, uPixel, uCoverMix, uHasCover, uPlane, uCoverLum;
   // 动效参数（对应 Mineradio 的 fx 滑块）
   uniform float uIntensity, uSpeed, uDepth, uTwist, uScatter, uBloom, uEdge, uBgFade;
+  // 实验调参（2026-09-15）：原硬编码常数提升为 uniform，默认值 = 原字面量
+  uniform float uFlowBase, uFlowBass, uFlowMid;
+  uniform float uRippleAmp, uPulseBase, uPulseBass, uBurstAmp;
+  uniform float uReliefAmp, uSizeBase, uSizeMax, uBrightBase, uAlphaBase;
   uniform float uPreset, uPresetBurst;
   uniform vec3 uColorA, uColorB;
   uniform sampler2D uCoverTex;
@@ -545,7 +538,7 @@ const VERTEX_SHADER = /* glsl */ `
 
     // ---- 流体位移：噪声流场给出连续曲线轨迹 ----
     vec3 flow = flowField(base, t);
-    float flowAmp = (0.55 + uBass * 1.60 + uMid * 0.65) * flowScale;
+    float flowAmp = (uFlowBase + uBass * uFlowBass + uMid * uFlowMid) * flowScale;
     vec3 p = base + flow * flowAmp;
 
     // ---- 封面形态：Z 轴呼吸 / 浮雕（全部由 snoise 驱动，平滑无棱角）----
@@ -558,17 +551,17 @@ const VERTEX_SHADER = /* glsl */ `
       float relief = (n1 * 0.60 + n2 * 0.40) * uMid * 1.15
                    + n3 * uTreble * 0.50
                    + breath * uBass * 1.25;
-      p.z += relief * m;
+      p.z += relief * m * uReliefAmp;
     }
 
     // 涟漪抬升
-    p.z += ripple * 1.30;
+    p.z += ripple * uRippleAmp;
 
     // ---- 节拍跳动 + 预设切换爆散：径向位移，先 smoothstep 缓动再施加 ----
     float pulse = smoothstep(0.0, 1.0, uPulse);
     vec3 dir = normalize(base + vec3(1e-4));
-    p += dir * pulse * (0.45 + uBass * 0.90) * burstScale;
-    p += dir * smoothstep(0.0, 1.0, uPresetBurst) * 1.60 * burstScale;
+    p += dir * pulse * (uPulseBase + uBass * uPulseBass) * burstScale;
+    p += dir * smoothstep(0.0, 1.0, uPresetBurst) * uBurstAmp * burstScale;
 
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
@@ -579,7 +572,7 @@ const VERTEX_SHADER = /* glsl */ `
     //   sprite 面积差约 8 倍。14k 颗粒子在 8 倍尺寸下必然糊成一片并拖垮填充率。
     // 另一个关键点：audioBoost 在 Mineradio 里作用在「尺寸」而非亮度上
     //   （涟漪/节拍让粒子变大，vBright 的权重反而很小）。
-    float depthSize = 36.0 / max(0.5, -mv.z);
+    float depthSize = uSizeBase / max(0.5, -mv.z);
     float sz;
     if (uPreset > 8.5) {
       float authoredDrive = uBass * 0.10 + uMid * 0.08 + uTreble * 0.12 + uPulse * 0.10;
@@ -593,7 +586,7 @@ const VERTEX_SHADER = /* glsl */ `
       sz = clamp(depthSize * (0.90 + ringDrive * 0.62), 1.05, 3.90);
     } else {
       float audioBoost = 1.0 + ripple * 0.7 + edgeBoost * 0.55 + uPulse * 0.30 + uPresetBurst * 0.5;
-      sz = clamp(depthSize * audioBoost, 1.05, 4.95);
+      sz = clamp(depthSize * audioBoost, 1.05, uSizeMax);
     }
     // 星河层用 Mineradio 的另一套夹取范围（其星河是独立着色器，尺寸更大更亮）
     float starSz = clamp(sz * 1.30, 0.75, 5.60);
@@ -678,13 +671,13 @@ const VERTEX_SHADER = /* glsl */ `
       vBright = 0.94 + maxRippleAmp * 0.64 + uBass * 0.08
               + edgeBoost * 0.12 + uEnergy * 0.05 + uPulse * 0.16 + uPresetBurst * 0.16;
     } else {
-      vBright = 0.82 + maxRippleAmp * 0.55 + uBass * 0.10
+      vBright = uBrightBase + maxRippleAmp * 0.55 + uBass * 0.10
               + edgeBoost * 0.30 + uEnergy * 0.05 + uPresetBurst * 0.40;
     }
     // 星河不参与预设亮度分组，保持稳定的 1.0（闪烁已含在 starCol 里）
     vGlow = isStar ? 1.0 : vBright;
 
-    float bodyAlpha = (0.55 + 0.45 * smoothstep(0.0, 1.0, 0.32 + uEnergy * 0.60))
+    float bodyAlpha = (uAlphaBase + (1.0 - uAlphaBase) * smoothstep(0.0, 1.0, 0.32 + uEnergy * 0.60))
                     * mix(1.0, 0.94, m);
     vAlpha = isStar ? twinkle * 0.75 : bodyAlpha;
     // 光晕强度：以默认值 0.62 为 1.0 基准，保证出厂观感不变
@@ -827,6 +820,13 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
   edgeTexture.generateMipmaps = false
   edgeTexture.flipY = false
 
+  /**
+   * 动效参数留存副本：setFx 写入、update() 读取。
+   * update() 需要其中的 spectrumAmp 来缩放频谱，仅靠 setFx 直接写 uniform 是不够的
+   * （每帧的 bass/mid/treble 都是新值，必须在这里才能乘上倍率）。
+   */
+  const fx: FxSettings = { ...DEFAULT_FX }
+
   const uniforms = {
     uTime: { value: 0 },
     uBass: { value: 0 },
@@ -848,6 +848,19 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     uBloom: { value: DEFAULT_FX.bloom },
     uEdge: { value: DEFAULT_FX.edge },
     uBgFade: { value: DEFAULT_FX.bgFade },
+    // 实验调参
+    uFlowBase: { value: DEFAULT_FX.flowBase },
+    uFlowBass: { value: DEFAULT_FX.flowBass },
+    uFlowMid: { value: DEFAULT_FX.flowMid },
+    uRippleAmp: { value: DEFAULT_FX.rippleAmp },
+    uPulseBase: { value: DEFAULT_FX.pulseBase },
+    uPulseBass: { value: DEFAULT_FX.pulseBass },
+    uBurstAmp: { value: DEFAULT_FX.burstAmp },
+    uReliefAmp: { value: DEFAULT_FX.reliefAmp },
+    uSizeBase: { value: DEFAULT_FX.sizeBase },
+    uSizeMax: { value: DEFAULT_FX.sizeMax },
+    uBrightBase: { value: DEFAULT_FX.brightBase },
+    uAlphaBase: { value: DEFAULT_FX.alphaBase },
     uPreset: { value: 0 },
     uPresetBurst: { value: 0 },
     uColorA: { value: COLOR_CHAMPAGNE.clone() },
@@ -918,15 +931,30 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     setCoverMix(mix: number) {
       uniforms.uCoverMix.value = Math.max(0, Math.min(1, mix))
     },
-    setFx(fx) {
-      uniforms.uIntensity.value = fx.intensity
-      uniforms.uSpeed.value = fx.speed
-      uniforms.uDepth.value = fx.depth
-      uniforms.uTwist.value = fx.twist
-      uniforms.uScatter.value = fx.scatter
-      uniforms.uBloom.value = fx.bloom
-      uniforms.uEdge.value = fx.edge
-      uniforms.uBgFade.value = fx.bgFade
+    setFx(next) {
+      // 留存一份，供 update() 读取（spectrumAmp 每帧都要用）
+      Object.assign(fx, next)
+      uniforms.uIntensity.value = next.intensity
+      uniforms.uSpeed.value = next.speed
+      uniforms.uDepth.value = next.depth
+      uniforms.uTwist.value = next.twist
+      uniforms.uScatter.value = next.scatter
+      uniforms.uBloom.value = next.bloom
+      uniforms.uEdge.value = next.edge
+      uniforms.uBgFade.value = next.bgFade
+      // 实验调参
+      uniforms.uFlowBase.value = next.flowBase
+      uniforms.uFlowBass.value = next.flowBass
+      uniforms.uFlowMid.value = next.flowMid
+      uniforms.uRippleAmp.value = next.rippleAmp
+      uniforms.uPulseBase.value = next.pulseBase
+      uniforms.uPulseBass.value = next.pulseBass
+      uniforms.uBurstAmp.value = next.burstAmp
+      uniforms.uReliefAmp.value = next.reliefAmp
+      uniforms.uSizeBase.value = next.sizeBase
+      uniforms.uSizeMax.value = next.sizeMax
+      uniforms.uBrightBase.value = next.brightBase
+      uniforms.uAlphaBase.value = next.alphaBase
     },
     setSkullPoints(positions) {
       if (!positions || positions.length < 3) return
@@ -946,10 +974,11 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     },
     update(features: AudioFeatures, c: CameraState) {
       uniforms.uTime.value = features.time
-      // 频谱振幅：见 SPECTRUM_AMPLITUDE 说明，只缩 bass/mid/treble，energy/pulse 保持原值
-      uniforms.uBass.value = features.bass * SPECTRUM_AMPLITUDE
-      uniforms.uMid.value = features.mid * SPECTRUM_AMPLITUDE
-      uniforms.uTreble.value = features.treble * SPECTRUM_AMPLITUDE
+      // 频谱振幅：只缩 bass/mid/treble，energy/pulse 保持原值。
+      // 倍率由「实验调参 → 频谱振幅」滑杆实时控制（关闭开关时上层已按 0 下发）。
+      uniforms.uBass.value = features.bass * fx.spectrumAmp
+      uniforms.uMid.value = features.mid * fx.spectrumAmp
+      uniforms.uTreble.value = features.treble * fx.spectrumAmp
       uniforms.uEnergy.value = features.energy
       uniforms.uPulse.value = features.pulse
 

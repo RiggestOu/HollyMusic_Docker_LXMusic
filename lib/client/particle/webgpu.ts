@@ -55,16 +55,6 @@ const FLOATS_PER_PARTICLE = 16
 /** 涟漪寿命，必须与 beat.ts 的 RIPPLE_LIFE 一致。 */
 const RIPPLE_LIFE = 2.0
 
-/**
- * 频谱驱动振幅倍率：bass/mid/treble 送进着色器前的整体缩放。
- * 1.0 = 原始强度；0.01 = 频谱对粒子的位移/加速度影响降为**百分之一**
- * （2026-09-15 用户两次要求各降十分之一：0.1 → 0.01）。
- * 只作用于 bass/mid/treble（频谱），**不缩放 energy/pulse**：
- *   · energy 参与 alpha 与亮度，一并缩小会让粒子整体变暗变透，超出「降振幅」范围；
- *   · pulse 是节拍冲量（beat），不是频谱。
- * webgl2.ts 有同名同值常量，调参时两处需同步。
- */
-const SPECTRUM_AMPLITUDE = 0.01
 
 /**
  * 封面平面边长：直接对齐 Mineradio 的 PLANE_SIZE = 4.8，与 webgl2.ts 保持一致。
@@ -128,9 +118,25 @@ const U = {
   bloom: 61,
   edge: 62,
   bgFade: 63,
+  // ---- 实验调参（2026-09-15 扩容：把着色器硬编码常数提升为 uniform）----
+  spectrumAmp: 64,
+  flowBase: 65,
+  flowBass: 66,
+  flowMid: 67,
+  rippleAmp: 68,
+  pulseBase: 69,
+  pulseBass: 70,
+  burstAmp: 71,
+  reliefAmp: 72,
+  sizeBase: 73,
+  sizeMax: 74,
+  brightBase: 75,
+  alphaBase: 76,
 } as const
 
-const UNIFORM_FLOATS = 64
+// 77 个 float 会被 WGSL 按 16 字节对齐补齐到 80（320 字节），与 struct Uniforms 的
+// 实际大小保持一致（静态校验脚本会比对二者，不一致会报错）。
+const UNIFORM_FLOATS = 80
 
 const WGSL = /* wgsl */ `
 struct Particle {
@@ -179,6 +185,22 @@ struct Uniforms {
   bloom: f32,
   edge: f32,
   bgFade: f32,
+  // ---- 实验调参（2026-09-15 扩容）----
+  // 原先这些是散落在着色器里的字面量，无法实时调节；现统一提升为 uniform，
+  // 默认值 = 原字面量，因此不改变默认观感。顺序须与 JS 侧 U 表逐项对应。
+  spectrumAmp: f32,
+  flowBase: f32,
+  flowBass: f32,
+  flowMid: f32,
+  rippleAmp: f32,
+  pulseBase: f32,
+  pulseBass: f32,
+  burstAmp: f32,
+  reliefAmp: f32,
+  sizeBase: f32,
+  sizeMax: f32,
+  brightBase: f32,
+  alphaBase: f32,
 };
 
 const PI: f32 = 3.141592653589793;
@@ -628,7 +650,12 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // 于是自然退化为星云形态，不会出现「粒子堆在一块没有图像的平面上」
     let m = clamp(u.coverMix, 0.0, 1.0) * u.hasCover;
     let planeTarget = vec3<f32>((p.uv.x - 0.5) * u.plane, (0.5 - p.uv.y) * u.plane, 0.0);
-    let cloudTarget = normalize(p.anchor + vec3<f32>(1e-4)) * (u.radius * (0.55 + p.seed * 0.45));
+    // 星云端直接用原始锚点 —— 与 webgl2 的 mix(position, planePos, m) 完全一致
+    // （webgl2 的 position 就是初始球面属性，等价于此处的 p.anchor）。
+    // 早期版本写成 normalize(anchor) * radius*(0.55+seed*0.45)，会重排粒子径向分布，
+    // 与 WebGL 的星云形态对不上。
+    // 注意：WGSL 在 TS 模板字符串里，注释中禁止出现反引号，否则提前闭合字符串报 TS1005。
+    let cloudTarget = p.anchor;
     tgt = mix(cloudTarget, planeTarget, m);
     flowScale = mix(1.0, 0.30, m); // 封面形态下减弱流动，否则图像会被抹糊
     burstScale = mix(1.0, 0.55, m);
@@ -650,9 +677,21 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // 粒子被甩出视野，表现为「出现一下就消失，与 WebGL 完全不一致」。
   // 现改为与 webgl2 同量级、同公式的**位移**；弹簧只负责平滑趋近，
   // 既保住切预设/切封面的连续过渡观感，目标又有界 → 不再发散。
-  let base = tgt;
+  var base = tgt;
+  // 粒子扭曲：绕视轴旋转（webgl2 :526-530 同式）
+  if (u.twist > 0.0) {
+    let tw = u.twist * (0.6 + base.z * 0.2);
+    let cw = cos(tw);
+    let sw = sin(tw);
+    base = vec3<f32>(cw * base.x - sw * base.y, sw * base.x + cw * base.y, base.z);
+  }
+  // 离散感：沿径向随机外扩（webgl2 :532-534 同式，aRand ↔ p.seed）
+  if (u.scatter > 0.0) {
+    base = base + normalize(base + vec3<f32>(1e-4)) * (p.seed - 0.5) * u.scatter * 2.0;
+  }
   let flow = flowField(base, u.time);
-  let flowAmp = (0.55 + u.bass * 1.60 + u.mid * 0.65) * flowScale;
+  // 位移系数改为 uniform（实验调参面板可实时改；默认 = webgl2 原字面量）
+  let flowAmp = (u.flowBase + u.bass * u.flowBass + u.mid * u.flowMid) * flowScale;
   tgt = base + flow * flowAmp;
   // 封面形态 Z 浮雕（webgl2 的 relief，:552-561 同式）：
   // WGSL 的 presetTarget 里 s<0.5 分支从 compute 走不到（preset<0.5 走了封面分支），
@@ -665,19 +704,23 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let breath = snoise(vec3<f32>(base.xy * 0.35, u.time * 0.40));
     let relief = (n1 * 0.60 + n2 * 0.40) * u.mid * 1.15
                + n3 * u.treble * 0.50 + breath * u.bass * 1.25;
-    tgt = tgt + vec3<f32>(0.0, 0.0, relief * mCover);
+    tgt = tgt + vec3<f32>(0.0, 0.0, relief * mCover * u.reliefAmp);
   }
   // 涟漪抬升（webgl2: p.z += ripple * 1.30）
-  tgt = tgt + vec3<f32>(0.0, 0.0, rippleSum(base.xy, u) * 1.30);
+  tgt = tgt + vec3<f32>(0.0, 0.0, rippleSum(base.xy, u) * u.rippleAmp);
   let dir = normalize(base + vec3<f32>(1e-4));
-  // 节拍跳动 + 预设切换爆散（webgl2 同式同量级）
-  tgt = tgt + dir * smoothstep(0.0, 1.0, u.pulse) * (0.45 + u.bass * 0.90) * burstScale;
-  tgt = tgt + dir * smoothstep(0.0, 1.0, u.presetBurst) * 1.60 * burstScale;
+  // 节拍跳动 + 预设切换爆散
+  tgt = tgt + dir * smoothstep(0.0, 1.0, u.pulse) * (u.pulseBase + u.bass * u.pulseBass) * burstScale;
+  tgt = tgt + dir * smoothstep(0.0, 1.0, u.presetBurst) * u.burstAmp * burstScale;
 
-  // 弹簧：平滑趋近上述归宿位置（形状切换是连续位移，不是跳变）
-  let acc = (tgt - p.pos) * 2.6;
-  p.vel = (p.vel + acc * u.dt) * 0.90;
-  p.pos = p.pos + p.vel * u.dt;
+  // ---- 直接落位（与 webgl2 的无状态模型逐项对齐）----
+  // webgl2 是**无状态**的：顶点着色器每帧由 aUv/aRand/position 直接算出最终位置，
+  // 没有任何跨帧状态，因此「过渡平滑」完全由上层缓动的 coverMix / presetBurst 负责。
+  // 本文件若继续用弹簧积分（哪怕目标算对了），也会自带惯性与滞后，
+  // 切预设/切封面的观感必然与 webgl2 不同 —— 这正是「WebGPU 不像 / WebGL 最像」的根源。
+  // 故这里改为**直接落位**：pos = tgt，与 webgl2 完全同构。
+  p.pos = tgt;
+  p.vel = vec3<f32>(0.0);
   particles[i] = p;
 }
 
@@ -728,7 +771,8 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   // （rip 已在上方声明，这里复用）
   let centerClip = ro_u.viewProj * vec4<f32>(p.pos, 1.0);
   let viewDist = max(0.5, centerClip.w);
-  let depthSize = 36.0 / viewDist;
+  // 36.0 → ro_u.sizeBase（实验调参可实时改，默认仍是 36）
+  let depthSize = ro_u.sizeBase / viewDist;
   var sz: f32;
   if (ro_u.preset > 8.5) {
     let authoredDrive = ro_u.bass * 0.10 + ro_u.mid * 0.08 + ro_u.treble * 0.12 + ro_u.pulse * 0.10;
@@ -743,7 +787,8 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   } else {
     // audioBoost 在 Mineradio 里作用在尺寸上（涟漪/节拍让粒子变大），不是亮度
     let audioBoost = 1.0 + rip * 0.7 + edgeBoost * 0.55 + ro_u.pulse * 0.30 + ro_u.presetBurst * 0.5;
-    sz = clamp(depthSize * audioBoost, 1.05, 4.95);
+    // 上限 4.95 → ro_u.sizeMax（实验调参可实时改）
+    sz = clamp(depthSize * audioBoost, 1.05, ro_u.sizeMax);
   }
   // 星河层用另一套夹取范围
   let starSz = clamp(sz * 1.30, 0.75, 5.60);
@@ -832,13 +877,15 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     vBright = 0.94 + maxRippleAmp * 0.64 + ro_u.bass * 0.08
             + edgeBoost * 0.12 + ro_u.energy * 0.05 + ro_u.pulse * 0.16 + ro_u.presetBurst * 0.16;
   } else {
-    vBright = 0.82 + maxRippleAmp * 0.55 + ro_u.bass * 0.10
+    // 0.82 → ro_u.brightBase（实验调参可实时改）
+    vBright = ro_u.brightBase + maxRippleAmp * 0.55 + ro_u.bass * 0.10
             + edgeBoost * 0.30 + ro_u.energy * 0.05 + ro_u.presetBurst * 0.40;
   }
   // 星河不参与预设亮度分组，保持稳定 1.0（闪烁已含在 starCol 里）
   out.glow = select(vBright, 1.0, isStar);
+  // 0.55 + 0.45*smoothstep(...) → alphaBase + (1-alphaBase)*smoothstep(...)
   var alpha = select(
-    (0.55 + 0.45 * smoothstep(0.0, 1.0, 0.32 + ro_u.energy * 0.60)) * mix(1.0, 0.94, mUse),
+    (ro_u.alphaBase + (1.0 - ro_u.alphaBase) * smoothstep(0.0, 1.0, 0.32 + ro_u.energy * 0.60)) * mix(1.0, 0.94, mUse),
     twinkle * 0.75,
     isStar
   );
@@ -1116,10 +1163,11 @@ export async function createWebGPURenderer(
       const dt = lastTime < 0 ? 1 / 60 : Math.min(0.05, Math.max(0.001, f.time - lastTime))
       lastTime = f.time
       uniformF32[U.dt] = dt
-      // 频谱振幅：见 SPECTRUM_AMPLITUDE 说明，只缩 bass/mid/treble，energy/pulse 保持原值
-      uniformF32[U.bass] = f.bass * SPECTRUM_AMPLITUDE
-      uniformF32[U.mid] = f.mid * SPECTRUM_AMPLITUDE
-      uniformF32[U.treble] = f.treble * SPECTRUM_AMPLITUDE
+      // 频谱振幅：只缩 bass/mid/treble，energy/pulse 保持原值。
+      // 倍率由「实验调参 → 频谱振幅」滑杆实时控制（关闭开关时上层已按 0 下发）。
+      uniformF32[U.bass] = f.bass * fx.spectrumAmp
+      uniformF32[U.mid] = f.mid * fx.spectrumAmp
+      uniformF32[U.treble] = f.treble * fx.spectrumAmp
       uniformF32[U.energy] = f.energy
       uniformF32[U.pulse] = f.pulse
       // 点大小换算用：tan(垂直 FOV / 2) 与绘制缓冲像素高
@@ -1133,6 +1181,20 @@ export async function createWebGPURenderer(
       uniformF32[U.bloom] = fx.bloom
       uniformF32[U.edge] = fx.edge
       uniformF32[U.bgFade] = fx.bgFade
+      // ---- 实验调参 ----
+      uniformF32[U.spectrumAmp] = fx.spectrumAmp
+      uniformF32[U.flowBase] = fx.flowBase
+      uniformF32[U.flowBass] = fx.flowBass
+      uniformF32[U.flowMid] = fx.flowMid
+      uniformF32[U.rippleAmp] = fx.rippleAmp
+      uniformF32[U.pulseBase] = fx.pulseBase
+      uniformF32[U.pulseBass] = fx.pulseBass
+      uniformF32[U.burstAmp] = fx.burstAmp
+      uniformF32[U.reliefAmp] = fx.reliefAmp
+      uniformF32[U.sizeBase] = fx.sizeBase
+      uniformF32[U.sizeMax] = fx.sizeMax
+      uniformF32[U.brightBase] = fx.brightBase
+      uniformF32[U.alphaBase] = fx.alphaBase
 
       const ripples = f.ripples
       for (let i = 0; i < 4; i++) {

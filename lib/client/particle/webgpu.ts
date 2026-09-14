@@ -1113,6 +1113,11 @@ export async function createWebGPURenderer(
   try {
     const context: Any = canvas.getContext('webgpu')
     if (!context) throw new Error('无法获取 webgpu canvas context')
+    // 声明在 use 之前，避免 TS2448（block-scoped variable used before declaration）
+    /** 2D 画布上下文：复用同一画布做渲染采样，避免重复获取 */
+    let canvas2dCtx: Any = null
+    /** 记录上次诊断过的「预设·封面组合」键，避免每帧刷屏 */
+    let lastDiagPresetLogged: string | undefined = undefined
     // 同时拿 2D 上下文，后续用于「渲染结果采样」诊断（每预设切一次）
     canvas2dCtx = canvas.getContext('2d', { willReadFrequently: true })
     if (!canvas2dCtx) console.warn('[particle] WebGPU 未获 2D context，渲染采样诊断将跳过')
@@ -1309,8 +1314,6 @@ export async function createWebGPURenderer(
     let drawHeightPx = 1
     /** 动效参数（滑杆实时更新） */
     const fx: FxSettings = { ...DEFAULT_FX }
-    /** 记录上次诊断过的「预设·封面组合」键，避免每帧刷屏 */
-    let lastDiagPresetLogged: string | undefined = undefined
 
     const writeUniforms = (f: AudioFeatures, c: CameraState) => {
       const sp = Math.sin(c.phi)
@@ -1532,7 +1535,7 @@ export async function createWebGPURenderer(
             ]
             const samplePoints = corners
               .map(({ x, y, label }) => {
-                const d = canvas2dCtx?.getImageData(x, y, 1, 1)?.data
+                const d = c2d?.getImageData(x, y, 1, 1)?.data
                 if (!d) return { label, rgba: null }
                 return { label, rgba: [d[0], d[1], d[2], d[3]] }
               })

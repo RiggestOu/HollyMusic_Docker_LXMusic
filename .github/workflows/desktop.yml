@@ -53,7 +53,7 @@ jobs:
           tauriScript: pnpm tauri
           args: --target x86_64-pc-windows-msvc
 
-      # 提供 artifact 下载（不使用 Release/tag）
+      # 原始 exe/msi 仍作为 artifact 备份（主要发布入口是下方 Release）
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -63,7 +63,7 @@ jobs:
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
           if-no-files-found: warn
 
-      # ---------- 打包为 artifact（不创建 Release/tag） ----------
+      # ---------- 打包为 zip（随后发布到 GitHub Release） ----------
       - name: Package installer zip
         shell: pwsh
         run: |
@@ -71,8 +71,16 @@ jobs:
           Compress-Archive -Path $exe.FullName -DestinationPath "hollymusic-desktop-latest.zip" -Force
           Get-Item "hollymusic-desktop-latest.zip" | Select-Object Name, Length
 
-      - name: Upload installer zip
-        uses: actions/upload-artifact@v4
+      # 固定滚动 tag（hollymusic-desktop-latest）复用同一 Release：不递增版本号、不每 build 一个 tag，
+      # 满足“发布到 Release”的诉求，同时把 SourceTree 里的标签数压到最少（仅 1 个固定 tag）。
+      - name: Publish installer to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: hollymusic-desktop-installer
-          path: hollymusic-desktop-latest.zip
+          tag_name: hollymusic-desktop-latest
+          name: hollymusic-desktop-latest
+          make_latest: true
+          files: hollymusic-desktop-latest.zip
+          body: |
+            Windows 桌面客户端安装包（NSIS installer）。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

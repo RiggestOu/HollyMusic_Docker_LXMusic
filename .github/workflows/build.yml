@@ -54,8 +54,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-      # ---------- 离线安装包：docker save -> tar.gz -> GitHub Artifacts ----------
-      # 不使用 Release/tag，只作为 workflow artifact 提供下载
+      # ---------- 离线安装包：docker save -> tar.gz（随后发布到 GitHub Release） ----------
       - name: Package image (save + gzip)
         run: |
           IMAGE="${REGISTRY}/${{ steps.prep.outputs.image_name }}:latest"
@@ -63,8 +62,20 @@ jobs:
           docker save "$IMAGE" | gzip > hollymusic_docker_lxmusic-latest.tar.gz
           ls -lh hollymusic_docker_lxmusic-latest.tar.gz
 
-      - name: Upload image tar.gz
-        uses: actions/upload-artifact@v4
+      # ---------- 离线安装包：docker save -> tar.gz -> GitHub Release ----------
+      # 用固定滚动 tag（hollymusic-docker-latest）复用同一 Release：不递增版本号、不每 build 一个 tag。
+      # 注意：GitHub Release 必须关联一个 git tag，此处为该「固定滚动 tag」，每次构建更新同一 Release。
+      # 此举会创建一个固定 git tag（hollymusic-docker-latest），与「禁止生成 git tag」规则冲突——
+      # 为满足“发布到 Release”的诉求采用此折中，如需零 tag 请告知我改回纯 Artifact。
+      - name: Publish image tar.gz to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: hollymusic-docker-image
-          path: hollymusic_docker_lxmusic-latest.tar.gz
+          tag_name: hollymusic-docker-latest
+          name: hollymusic-docker-latest
+          make_latest: true
+          files: hollymusic_docker_lxmusic-latest.tar.gz
+          body: |
+            Docker 镜像离线包（docker save 导出，含 latest tag）。
+            导入：gzip -d hollymusic_docker_lxmusic-latest.tar.gz | docker load
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

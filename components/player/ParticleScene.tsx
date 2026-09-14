@@ -181,7 +181,11 @@ export function ParticleScene({
   // 由下方 effect 写入；props.preset 来自 LyricsPanel 旧 state，若在此覆盖会令
   // 「切了预设又被重渲染弹回专辑封面」——这正是预设切了不生效的根因。
   const liveRef = useRef({ isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset: loadStoredPreset() })
-  liveRef.current = { isPlaying, paused, remoteSpectrum, onWheelMenu, fps }
+  // 每次渲染重建时保留 preset 当前值（由 storePreset + PRESET_CHANGED_EVENT effect 写入），
+  // 不从 props.preset 覆盖，否则「切了预设又被重渲染弹回专辑封面」。
+  // 注意：useRef 无显式类型参数，会从上面初始化对象推断出 liveRef.current 含必填 preset，
+  // 故此处必须带上 preset，否则 TS2741。
+  liveRef.current = { isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset: liveRef.current.preset }
 
   /**
     * 监听 FxSettings 变化 → 实时下发给渲染器。

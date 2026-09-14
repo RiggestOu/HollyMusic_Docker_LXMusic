@@ -6,11 +6,15 @@
 
 ### Docker 部署
 
-#### 方式一：在线安装（需能访问 GHCR）
+本项目提供两种部署方式：
+
+#### 方式一：在线安装（推荐，需能访问 GHCR）
 
 ```bash
-docker compose up -d
+docker compose -f online/docker-compose.yml up -d
 ```
+
+每次更新时执行 `docker compose -f online/docker-compose.yml pull && docker compose -f online/docker-compose.yml up -d` 即可。
 
 访问 http://localhost:3099
 
@@ -30,11 +34,13 @@ docker compose up -d
    docker images | grep hollymusic_docker_lxmusic
    ```
 
-5. 使用 `docker compose up -d` 启动
+5. 使用离线配置启动：
+
+   ```bash
+   docker compose -f offline/docker-compose.yml up -d
+   ```
 
 如需更新，重新下载新包并再次 `docker load`，然后重启 Compose。
-
-> 注意：`pull_policy: never` 要求 Docker Compose v2 或更高版本。检查版本：`docker compose version`
 
 ## 功能特性
 

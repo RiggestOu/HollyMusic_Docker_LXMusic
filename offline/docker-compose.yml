@@ -1,0 +1,50 @@
+# ============================================================
+# HollyMusic 离线部署配置（使用本地镜像）
+# ============================================================
+# 适用于 GHCR 无法访问或需要离线部署的环境
+#
+# 使用前需先导入镜像：
+#   docker load -i hollymusic_docker_lxmusic-latest.tar.gz
+#
+# ⚠️ 必填：../.env 中需有 AUTH_SECRET
+#    数据持久化在 ../prisma_data
+#
+# 使用：docker compose -f offline/docker-compose.yml up -d
+# 访问：http://localhost:3099
+# ============================================================
+
+services:
+  app:
+    image: hollymusic_docker_lxmusic:latest
+    container_name: holly-music
+
+    pull_policy: never
+
+    ports:
+      - "3099:3000"
+
+    env_file:
+      - ../.env
+
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:./prisma/data/music.db
+      - ENABLE_FILE_CACHE=true
+      - AUDIO_CACHE_DIR=/app/.cache/audio-cache
+      - AUDIO_CACHE_QUOTA_GB=10
+
+    volumes:
+      - ../custom-sources:/app/custom-sources
+      - ../config:/app/config
+      - ../prisma_data:/app/prisma/prisma/data
+      - ../cache_data:/app/.cache
+      - ../app_logs:/app/logs
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

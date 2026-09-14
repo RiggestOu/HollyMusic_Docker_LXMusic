@@ -50,6 +50,16 @@ const DEFAULT_STAR_COUNT = 1400
 /** 涟漪寿命，必须与 beat.ts 的 RIPPLE_LIFE 一致。 */
 const RIPPLE_LIFE = 2.0
 
+/**
+ * 频谱驱动振幅倍率：bass/mid/treble 送进着色器前的整体缩放。
+ * 1.0 = 原始强度；0.1 = 频谱对粒子的位移/加速度影响降为十分之一（2026-09-15 用户要求）。
+ * 只作用于 bass/mid/treble（频谱），**不缩放 energy/pulse**：
+ *   · energy 参与 alpha 与亮度，一并缩小会让粒子整体变暗变透，超出「降振幅」范围；
+ *   · pulse 是节拍冲量（beat），不是频谱。
+ * webgpu.ts 有同名同值常量，调参时两处需同步。
+ */
+const SPECTRUM_AMPLITUDE = 0.1
+
 const VERTEX_SHADER = /* glsl */ `
   precision highp float;
 
@@ -935,9 +945,10 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     },
     update(features: AudioFeatures, c: CameraState) {
       uniforms.uTime.value = features.time
-      uniforms.uBass.value = features.bass
-      uniforms.uMid.value = features.mid
-      uniforms.uTreble.value = features.treble
+      // 频谱振幅：见 SPECTRUM_AMPLITUDE 说明，只缩 bass/mid/treble，energy/pulse 保持原值
+      uniforms.uBass.value = features.bass * SPECTRUM_AMPLITUDE
+      uniforms.uMid.value = features.mid * SPECTRUM_AMPLITUDE
+      uniforms.uTreble.value = features.treble * SPECTRUM_AMPLITUDE
       uniforms.uEnergy.value = features.energy
       uniforms.uPulse.value = features.pulse
 

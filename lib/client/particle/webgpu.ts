@@ -56,6 +56,16 @@ const FLOATS_PER_PARTICLE = 16
 const RIPPLE_LIFE = 2.0
 
 /**
+ * 频谱驱动振幅倍率：bass/mid/treble 送进着色器前的整体缩放。
+ * 1.0 = 原始强度；0.1 = 频谱对粒子的位移/加速度影响降为十分之一（2026-09-15 用户要求）。
+ * 只作用于 bass/mid/treble（频谱），**不缩放 energy/pulse**：
+ *   · energy 参与 alpha 与亮度，一并缩小会让粒子整体变暗变透，超出「降振幅」范围；
+ *   · pulse 是节拍冲量（beat），不是频谱。
+ * webgl2.ts 有同名同值常量，调参时两处需同步。
+ */
+const SPECTRUM_AMPLITUDE = 0.1
+
+/**
  * 封面平面边长：直接对齐 Mineradio 的 PLANE_SIZE = 4.8，与 webgl2.ts 保持一致。
  * 这个尺度与涟漪半径、各预设的绝对坐标常量、相机基线半径、FOV 是一整套耦合参数，
  * 单独改任何一个都会让涟漪只覆盖中心一小块、或让粒子跑出取景框。
@@ -1012,11 +1022,16 @@ export async function createWebGPURenderer(
       primitive: { topology: 'triangle-list' },
     })
 
+    // compute 阶段经 cs_main → presetTarget() 采样了 u_edgeTex(binding 4) + u_coverSampler(binding 2)，
+    // 且 rippleSum/flowField 只用 uniform。故 layout:'auto' 生成的计算布局含 binding 0/1/2/4。
+    // 早期版本这里漏了 binding 2（采样器）→ bindGroup 非法 → dispatch 失效，且同一 encoder 内的
+    // render pass 一并作废 → WebGPU 后端「初始化成功但完全不出粒子」。务必与上面保持四项齐全。
     const computeBindGroup = device.createBindGroup({
       layout: computePipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: particleBuffer } },
         { binding: 1, resource: { buffer: uniformBuffer } },
+        { binding: 2, resource: coverSampler },
         { binding: 4, resource: edgeTexture.createView() },
       ],
     })
@@ -1081,9 +1096,10 @@ export async function createWebGPURenderer(
       const dt = lastTime < 0 ? 1 / 60 : Math.min(0.05, Math.max(0.001, f.time - lastTime))
       lastTime = f.time
       uniformF32[U.dt] = dt
-      uniformF32[U.bass] = f.bass
-      uniformF32[U.mid] = f.mid
-      uniformF32[U.treble] = f.treble
+      // 频谱振幅：见 SPECTRUM_AMPLITUDE 说明，只缩 bass/mid/treble，energy/pulse 保持原值
+      uniformF32[U.bass] = f.bass * SPECTRUM_AMPLITUDE
+      uniformF32[U.mid] = f.mid * SPECTRUM_AMPLITUDE
+      uniformF32[U.treble] = f.treble * SPECTRUM_AMPLITUDE
       uniformF32[U.energy] = f.energy
       uniformF32[U.pulse] = f.pulse
       // 点大小换算用：tan(垂直 FOV / 2) 与绘制缓冲像素高

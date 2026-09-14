@@ -46,7 +46,7 @@ import { loadCoverTexture, type CoverTexture } from '@/lib/client/particle/cover
 import { enhanceCoverDepth } from '@/lib/client/particle/cover-depth-ai'
 import { loadSkullPointCloud, resampleSkull } from '@/lib/client/particle/skull-points'
 import { isMobileLike, suggestedGrid } from '@/lib/utils/device'
-import { subscribePresetChange } from '@/lib/client/particle/presets'
+import { subscribePresetChange, loadStoredPreset } from '@/lib/client/particle/presets'
 
 export interface ParticleSceneProps {
   /** 当前播放的原生音频元素；为 null 时粒子仅做静息动画。 */
@@ -163,6 +163,9 @@ export function ParticleScene({
   const rendererRef = useRef<ParticleRenderer | null>(null)
   /** 封面 effect 早于渲染器就绪时，把结果暂存到这里，由主 effect 初始化后补上。 */
   const pendingCoverRef = useRef<CoverTexture | null>(null)
+  /** 频段 bin 边界（按真实采样率/fftSize 对齐 Mineradio 的频率分区），bindPipeline 时填充。 */
+  const bandBinsRef = useRef({ bassLo: 2, bassHi: 20, midLo: 121, midHi: 288, trebLo: 288, trebHi: 1023 })
+
   /** 当前是否已装载真实封面（决定 auto 形态的目标值）。 */
   const hasCoverRef = useRef(false)
   /** 封面代次：每装载一张新封面 +1，渲染循环据此把 coverMix 归零重聚。 */
@@ -174,8 +177,11 @@ export function ParticleScene({
   fxRef.current = fx
 
   /** 供事件回调与渲染循环读取的最新值，避免重建场景。 */
-  const liveRef = useRef({ isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset })
-  liveRef.current = { isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset }
+  // preset 不进每次渲染的重建对象：预设切换经 storePreset + PRESET_CHANGED_EVENT
+  // 由下方 effect 写入；props.preset 来自 LyricsPanel 旧 state，若在此覆盖会令
+  // 「切了预设又被重渲染弹回专辑封面」——这正是预设切了不生效的根因。
+  const liveRef = useRef({ isPlaying, paused, remoteSpectrum, onWheelMenu, fps, preset: loadStoredPreset() })
+  liveRef.current = { isPlaying, paused, remoteSpectrum, onWheelMenu, fps }
 
   /**
     * 监听 FxSettings 变化 → 实时下发给渲染器。
@@ -283,7 +289,22 @@ export function ParticleScene({
     const bindPipeline = (p: AudioAnalysisPipeline | null) => {
       if (!p) return false
       pipeline = p
-      freqData = new Uint8Array(p.analyser.frequencyBinCount)
+      const n = p.analyser.frequencyBinCount
+      freqData = new Uint8Array(n)
+      // 频段 bin 边界：按真实采样率/fftSize 映射 Mineradio 的频率分区
+      // （bass 40-420Hz / mid 2600-6200Hz / treble 6200Hz+，对齐 11-main-loop.js:368-390）
+      const sr = p.analyser.sampleRate || 44100
+      const fft = p.analyser.fftSize || n * 2
+      const hzPerBin = sr / fft
+      const binOf = (hz: number) => Math.max(0, Math.min(n - 1, Math.round(hz / hzPerBin)))
+      bandBinsRef.current = {
+        bassLo: binOf(40),
+        bassHi: binOf(420),
+        midLo: binOf(2600),
+        midHi: binOf(6200),
+        trebLo: binOf(6200),
+        trebHi: n - 1,
+      }
       usingSynth = false
       return true
     }
@@ -328,26 +349,30 @@ export function ParticleScene({
         data = synthSmooth
       }
 
+      const bins = bandBinsRef.current
       const n = data.length
-      const loEnd = Math.max(1, Math.floor(n * 0.12))
-      const midEnd = Math.max(loEnd + 1, Math.floor(n * 0.42))
-      let lo = 0
-      let mi = 0
-      let hi = 0
-      for (let i = 0; i < loEnd; i++) lo += data[i]
-      for (let i = loEnd; i < midEnd; i++) mi += data[i]
-      for (let i = midEnd; i < n; i++) hi += data[i]
-      lo = lo / loEnd / 255
-      mi = mi / (midEnd - loEnd) / 255
-      hi = hi / Math.max(1, n - midEnd) / 255
+      // 按频率范围取 RMS（对齐 Mineradio 的 beatBandRms：bass 40-420Hz / mid 2600-6200Hz / treble 6200Hz+），
+      // 用 RMS 而非算术平均，更接近频段真实能量，也避免把大量非 kick 能量算进低频。
+      const bandRms = (lo: number, hi: number): number => {
+        const a = Math.max(0, Math.min(n - 1, lo))
+        const b = Math.max(0, Math.min(n - 1, hi))
+        if (b < a) return 0
+        let s = 0
+        for (let i = a; i <= b; i++) s += data[i] * data[i]
+        return Math.sqrt(s / (b - a + 1)) / 255
+      }
+      const rb = bandRms(bins.bassLo, bins.bassHi)
+      const rm = bandRms(bins.midLo, bins.midHi)
+      const rt = bandRms(bins.trebLo, bins.trebHi)
+      const re = bandRms(0, n - 1)
 
       // 既无分析管线又未在播放时，让粒子完全静息（否则合成频谱会自嗨）
       const active = liveRef.current.isPlaying || !usingSynth ? 1 : 0
       return {
-        bass: lo * active,
-        mid: mi * active,
-        treble: hi * active,
-        energy: ((lo + mi + hi) / 3) * active,
+        bass: rb * active,
+        mid: rm * active,
+        treble: rt * active,
+        energy: re * active,
       }
     }
 

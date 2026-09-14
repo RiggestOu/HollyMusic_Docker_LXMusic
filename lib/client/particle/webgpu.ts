@@ -604,12 +604,12 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var p = particles[i];
   let isStar = p.kind > 0.5;
 
-  // ---- 归宿位置 ----
-  var target: vec3<f32>;
+  // ---- 归宿位置 ----（tgt 避开 WGSL 保留字 target，否则 WebGPU 编译失败降级 WebGL）
+  var tgt: vec3<f32>;
   var flowScale: f32;
   var burstScale: f32;
   if (isStar) {
-    target = starTarget(p.anchor, p.seed, u.time, u.plane);
+    tgt = starTarget(p.anchor, p.seed, u.time, u.plane);
     flowScale = 1.0;
     burstScale = 0.0; // 星河不参与预设切换爆散
   } else if (u.preset < 0.5) {
@@ -618,21 +618,21 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let m = clamp(u.coverMix, 0.0, 1.0) * u.hasCover;
     let planeTarget = vec3<f32>((p.uv.x - 0.5) * u.plane, (0.5 - p.uv.y) * u.plane, 0.0);
     let cloudTarget = normalize(p.anchor + vec3<f32>(1e-4)) * (u.radius * (0.55 + p.seed * 0.45));
-    target = mix(cloudTarget, planeTarget, m);
+    tgt = mix(cloudTarget, planeTarget, m);
     flowScale = mix(1.0, 0.30, m); // 封面形态下减弱流动，否则图像会被抹糊
     burstScale = mix(1.0, 0.55, m);
   } else {
     // 逐式对齐 Mineradio 后，预设自身已含完整几何与音频位移；
     // 其原式没有流场，这里只保留很轻的一层以免丢掉「流体感」
-    target = presetTarget(p.uv, p.seed, p.anchor);
+    tgt = presetTarget(p.uv, p.seed, p.anchor);
     flowScale = 0.25;
     burstScale = 1.0;
   }
 
-  let dir = normalize(target + vec3<f32>(1e-4));
+  let dir = normalize(tgt + vec3<f32>(1e-4));
 
   // 弹簧：平滑趋近归宿形态（形状之间的过渡全是连续位移，不是跳变）
-  var acc = (target - p.pos) * 2.6;
+  var acc = (tgt - p.pos) * 2.6;
   // 噪声流场：流体 / 烟雾感的主要来源，轨迹为平滑曲线而非折线
   acc += flowField(p.pos, u.time) * (5.0 + u.bass * 14.0 + u.mid * 5.0) * flowScale;
   // 高频细颤

@@ -96,8 +96,20 @@ function decay(dt: number, rate: number): number {
   return Math.exp(-dt * rate)
 }
 
+/**
+ * 非对称包络平滑（对齐 Mineradio 的 env()）：上升用较短时间常数（attack，跟手），
+ * 回落用较长时间常数（release，柔和）。dt 归一化，与帧率解耦。
+ * tau 取值由 Mineradio 的 attack/release 系数（0.28 / 0.075 等，按 60fps 假设）反推：
+ *   tau = -(1/60) / ln(1 - k)
+ */
+function envAt(prev: number, next: number, tauAtt: number, tauRel: number, dt: number): number {
+  const rising = next > prev
+  const k = 1 - Math.exp(-dt / (rising ? tauAtt : tauRel))
+  return prev + (next - prev) * k
+}
+
 export function createBeatTracker(): BeatTracker {
-  // 频段包络
+  // 频段包络（用于 onset 检测的 flux 基准，沿用原逻辑）
   let bass = 0
   let mid = 0
   let treble = 0
@@ -107,6 +119,16 @@ export function createBeatTracker(): BeatTracker {
   let midBase = 0
   let trebleBase = 0
   let pulse = 0
+  // ---- Mineradio 频谱响应对齐：动态峰值 + 非对称 env 平滑状态 ----
+  // 近期峰值（缓慢衰减），作为归一化分母；地板值防止静音段落被底噪触发
+  let bassPeak = 0.03
+  let midPeak = 0.026
+  let treblePeak = 0.018
+  let energyPeak = 0.03
+  // 非对称 env 平滑后的输出（对齐 Mineradio 的 smoothBass/smoothMid/smoothTreb）
+  let smoothBass = 0
+  let smoothMid = 0
+  let smoothTreb = 0
 
   const ripples: Ripple[] = []
   for (let i = 0; i < MAX_RIPPLES; i++) {
@@ -198,7 +220,7 @@ export function createBeatTracker(): BeatTracker {
       midBase = midOnset.baseline
       trebleBase = trebleOnset.baseline
 
-      // 先更新包络，再算脉冲，保证同一帧里的 onset 与包络一致
+      // 先更新包络（用于 onset flux 基准），再算脉冲，保证同一帧里的 onset 与包络一致
       bass += (raw.bass - bass) * kBass
       mid += (raw.mid - mid) * kMid
       treble += (raw.treble - treble) * kTreble
@@ -217,11 +239,28 @@ export function createBeatTracker(): BeatTracker {
         if (onset >= RIPPLE_MIN_STRENGTH) pushRipple(0, 0, onset)
       }
 
+      // ---- Mineradio 频谱响应对齐：动态峰值归一化 + 非对称 env 平滑 ----
+      // 峰值跟踪（11-main-loop.js:394-397）：近期峰值缓慢衰减，作为归一化分母，
+      // 让「相对当前段落峰值」的律动幅度稳定，安静段落不会因绝对能量高而自嗨。
+      bassPeak = Math.max(bassPeak * 0.994, raw.bass, 0.030)
+      midPeak = Math.max(midPeak * 0.993, raw.mid, 0.026)
+      treblePeak = Math.max(treblePeak * 0.992, raw.treble, 0.018)
+      energyPeak = Math.max(energyPeak * 0.995, raw.energy, 0.030)
+      // 归一化（11-main-loop.js:399-402）：相对峰值取比值再做 pow 提升小值，裁剪到 1
+      const rb = Math.min(1, Math.pow(raw.bass / Math.max(0.038, bassPeak * 0.66), 0.78))
+      const rm = Math.min(1, Math.pow(raw.mid / Math.max(0.025, midPeak * 0.70), 0.86))
+      const rt = Math.min(1, Math.pow(raw.treble / Math.max(0.020, treblePeak * 0.74), 0.92))
+      const re = Math.min(1, Math.pow(raw.energy / Math.max(0.034, energyPeak * 0.68), 0.82))
+      // 非对称 env 平滑（11-main-loop.js:484-487）：attack 快、release 慢，dt 归一化
+      smoothBass = envAt(smoothBass, Math.min(0.82, rb * 0.78 + re * 0.025), 0.0507, 0.2138, step)
+      smoothMid = envAt(smoothMid, Math.min(0.68, rm * 0.64 + re * 0.025), 0.0840, 0.2693, step)
+      smoothTreb = envAt(smoothTreb, Math.min(0.56, rt * 0.54), 0.0840, 0.2693, step)
+
       advanceRipples(step)
 
-      frame.bass = bass
-      frame.mid = mid
-      frame.treble = treble
+      frame.bass = smoothBass
+      frame.mid = smoothMid
+      frame.treble = smoothTreb
       frame.energy = energy
       frame.pulse = pulse
       frame.onset = onset

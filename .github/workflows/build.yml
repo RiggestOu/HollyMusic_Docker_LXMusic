@@ -36,37 +36,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          # 推送三个 tag：
-          #   latest        —— 永远指向最新构建
-          #   <commit-sha>  —— 精确锁定某次提交，便于回滚排查
-          #   build-<N>     —— 递增且好认，每次推送都会多一条
-          tags: |
-            ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:latest
-            ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ steps.prep.outputs.image_name }}:build-${{ github.run_number }}
-          platforms: linux/amd64
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-
-      # ---------- 离线安装包：docker save -> tar.gz（随后发布到 GitHub Release） ----------
-      - name: Package image (save + gzip)
+      # ---------- 本地构建镜像 + 打离线 tar.gz + 推送 GHCR ----------
+      # 用 docker build（BuildKit）在本地直接生成镜像，docker save 导出 tar.gz（不再 docker pull 回拉，
+      # 避免「push 后本地无镜像 → pull 失败 → tar.gz 缺失 → Release 没发」的链路断裂）。
+      - name: Build image (local) and package tar.gz
+        env:
+          DOCKER_BUILDKIT: 1
         run: |
-          IMAGE="${REGISTRY}/${{ steps.prep.outputs.image_name }}:latest"
-          docker pull "$IMAGE"
-          docker save "$IMAGE" | gzip > hollymusic_docker_lxmusic-latest.tar.gz
+          IMG="${REGISTRY}/${{ steps.prep.outputs.image_name }}"
+          docker build -t "$IMG:latest" .
+          docker save "$IMG:latest" | gzip > hollymusic_docker_lxmusic-latest.tar.gz
           ls -lh hollymusic_docker_lxmusic-latest.tar.gz
+
+      - name: Push Docker image to GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          IMG="${REGISTRY}/${{ steps.prep.outputs.image_name }}"
+          docker tag "$IMG:latest" "$IMG:${{ github.sha }}"
+          docker tag "$IMG:latest" "$IMG:build-${{ github.run_number }}"
+          docker push "$IMG:latest"
+          docker push "$IMG:${{ github.sha }}"
+          docker push "$IMG:build-${{ github.run_number }}"
 
       # ---------- 离线安装包：docker save -> tar.gz -> GitHub Release ----------
       # 用固定滚动 tag（hollymusic-docker-latest）复用同一 Release：不递增版本号、不每 build 一个 tag。
       # 注意：GitHub Release 必须关联一个 git tag，此处为该「固定滚动 tag」，每次构建更新同一 Release。
-      # 此举会创建一个固定 git tag（hollymusic-docker-latest），与「禁止生成 git tag」规则冲突——
-      # 为满足“发布到 Release”的诉求采用此折中，如需零 tag 请告知我改回纯 Artifact。
+      # 这是用户确认的折中：CI 用固定滚动 tag 发布到 Release，但不产生递增版本号 / 本地标签（SourceTree 不显示）。
+      # 退化选项：如需完全零 tag，请告知我改回纯 Artifact（但将不再发 Release）。
       - name: Publish image tar.gz to Release
         uses: softprops/action-gh-release@v2
         with:

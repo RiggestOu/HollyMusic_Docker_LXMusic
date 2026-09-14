@@ -37,7 +37,7 @@ import {
   Heart,
   Download,
   X,
-  SlidersHorizontal,
+  Settings,
 } from 'lucide-react'
 
 interface LyricsPanelProps {
@@ -250,22 +250,11 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           onBackend={setBackend}
         />
 
-        {/* 右上角：齿轮按钮（打开粒子设置面板，含视觉预设 + 动效参数标签页） + 后端指示 */}
-        <div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-1">
-          <button
-            onClick={() => setSettingsOpen(v => !v)}
-            className={`touch-target flex items-center justify-center rounded-full border border-white/15 bg-black/40 p-1.5 backdrop-blur transition hover:text-white ${
-              settingsOpen ? 'text-primary' : 'text-white/70'
-            }`}
-            title="粒子设置"
-            aria-label="粒子设置（含视觉预设与动效参数）"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-          </button>
-          {/* 渲染后端指示：WebGPU 优先，不支持时自动降级 WebGL 2.0 */}
+        {/* 右上角：仅显示后端状态（WebGPU / WebGL 2.0） */}
+        <div className="absolute right-3 top-3 z-10 text-right">
           {backend && (
             <span
-              className={`block text-right text-[10px] ${
+              className={`block text-[10px] ${
                 backend === 'webgpu' ? 'text-emerald-400/80' : 'text-white/40'
               }`}
               title={
@@ -632,16 +621,13 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           </button>
           {/* 歌词显示方式（平铺 → 贴合粒子 → 单行）：按需求从顶栏挪到收藏按钮右侧 */}
           <button
-            onClick={cycleMode}
+            onClick={() => setSettingsOpen(true)}
             className="touch-target flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            title={`歌词显示：${MODE_META[mode].label}（点击切换）`}
-            aria-label={`歌词显示模式：${MODE_META[mode].label}，点击切换`}
+            title="设置（含视觉预设、动效参数与歌词显示模式）"
+            aria-label="打开设置面板"
           >
-            {(() => {
-              const Icon = MODE_META[mode].icon
-              return <Icon className="h-4 w-4" />
-            })()}
-            <span>{MODE_META[mode].label}</span>
+            <Settings className="h-4 w-4" />
+            <span>设置</span>
           </button>
         </div>
       </div>

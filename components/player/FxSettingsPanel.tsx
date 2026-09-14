@@ -16,9 +16,9 @@ import {
 } from '@/lib/client/particle/presets'
 import type { BackendPreference } from '@/lib/client/particle'
 import { useFxSettingsStore, type FxSettings, DEFAULT_FX } from '@/lib/store/fx-settings-store'
-import { SlidersHorizontal, Sparkles, RotateCcw, X, Cpu } from 'lucide-react'
+import { SlidersHorizontal, Sparkles, RotateCcw, X, Cpu, AlignJustify, Layers, Type } from 'lucide-react'
 
-type Tab = 'preset' | 'fx'
+type Tab = 'preset' | 'fx' | 'lyrics'
 
 interface SliderDef {
   key: keyof FxSettings
@@ -40,6 +40,31 @@ const SLIDERS: SliderDef[] = [
   { key: 'bgFade', label: '背景压暗', min: 0, max: 2.0, step: 0.01, desc: '背景层（星河）透明度补量' },
 ]
 
+type LyricsMode = 'tile' | 'plane' | 'single'
+
+const MODE_META: Record<LyricsMode, { label: string; icon: typeof AlignJustify }> = {
+  tile: { label: '平铺', icon: AlignJustify },
+  plane: { label: '贴合粒子', icon: Layers },
+  single: { label: '单行', icon: Type },
+}
+
+function loadLyricsMode(): LyricsMode {
+  try {
+    const v = localStorage.getItem('lyrics-display-mode')
+    return v === 'plane' || v === 'single' ? v : 'tile'
+  } catch {
+    return 'tile'
+  }
+}
+
+function saveLyricsMode(m: LyricsMode) {
+  try {
+    localStorage.setItem('lyrics-display-mode', m)
+  } catch {
+    /* ignore */
+  }
+}
+
 export function ParticleSettingsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('fx')
   const fx = useFxSettingsStore((s) => s.fx)
@@ -48,6 +73,7 @@ export function ParticleSettingsPanel({ open, onClose }: { open: boolean; onClos
   const update = useFxSettingsStore((s) => s.update)
   const reset = useFxSettingsStore((s) => s.reset)
   const [preset, setPreset] = useState(() => loadStoredPreset())
+  const [lyricsMode, setLyricsMode] = useState<LyricsMode>(loadLyricsMode)
 
   const applyPreset = (index: number) => {
     const next = clampPreset(index)
@@ -99,7 +125,7 @@ export function ParticleSettingsPanel({ open, onClose }: { open: boolean; onClos
 
         {/* 标签页切换 */}
         <div className="flex shrink-0 border-b border-border px-4">
-          {([['fx', '动效参数'], ['preset', '视觉预设']] as [Tab, string][]).map(([k, label]) => (
+          {([['fx', '动效参数'], ['preset', '视觉预设'], ['lyrics', '歌词显示']] as [Tab, string][]).map(([k, label]) => (
             <button
               key={k}
               onClick={() => setTab(k)}
@@ -192,6 +218,33 @@ export function ParticleSettingsPanel({ open, onClose }: { open: boolean; onClos
                   <span className="ml-1 text-[10px] opacity-60">#{item.id + 1}</span>
                 </button>
               ))}
+            </div>
+          )}
+
+          {tab === 'lyrics' && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">选择歌词显示方式</p>
+              <div className="grid grid-cols-3 gap-2">
+                {(Object.entries(MODE_META) as [LyricsMode, typeof MODE_META['tile']][]).map(
+                  ([mode, meta]) => (
+                    <button
+                      key={mode}
+                      onClick={() => {
+                        setLyricsMode(mode)
+                        saveLyricsMode(mode)
+                      }}
+                      className={`flex flex-col items-center gap-1.5 rounded-lg border px-3 py-3 text-xs transition ${
+                        lyricsMode === mode
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      <meta.icon className="h-5 w-5" />
+                      <span>{meta.label}</span>
+                    </button>
+                  )
+                )}
+              </div>
             </div>
           )}
         </div>

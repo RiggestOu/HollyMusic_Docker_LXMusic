@@ -51,6 +51,9 @@ export function App() {
   // 播放引擎只创建一张原生 Audio；传给底栏与歌词详情共用同一分析对象。
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
 
+  // 初始化粒子诊断日志拦截器（全局生效：console.warn/error 中 [particle] 前缀的日志自动上报到服务端）
+  useParticleLogger()
+
   // 启动时获取会话状态
   useEffect(() => {
     initAuth()

@@ -54,11 +54,8 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-      # ---------- 离线安装包：docker save -> tar.gz -> GitHub Releases ----------
-      # 用途：NAS 直连 GHCR 拉取被重置（connection reset）时的替代安装方式。
-      # 固定发布到预发布版 "image-latest"，每次构建覆盖更新（不刷爆 Release 列表），
-      # 下载地址恒定为:
-      #   https://github.com/<owner>/<repo>/releases/download/image-latest/hollymusic_docker_lxmusic-latest.tar.gz
+      # ---------- 离线安装包：docker save -> tar.gz -> GitHub Artifacts ----------
+      # 不使用 Release/tag，只作为 workflow artifact 提供下载
       - name: Package image (save + gzip)
         run: |
           IMAGE="${REGISTRY}/${{ steps.prep.outputs.image_name }}:latest"
@@ -66,13 +63,8 @@ jobs:
           docker save "$IMAGE" | gzip > hollymusic_docker_lxmusic-latest.tar.gz
           ls -lh hollymusic_docker_lxmusic-latest.tar.gz
 
-      - name: Upload image tar.gz to GitHub Releases
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # 使用 build-<run_number> 作为 release tag，避免与镜像 tag 冲突
-          RELEASE_TAG="build-${{ github.run_number }}"
-          gh release delete "$RELEASE_TAG" --cleanup-tag --yes || true
-          gh release create "$RELEASE_TAG" hollymusic_docker_lxmusic-latest.tar.gz \
-            --title "Docker image build ${{ github.run_number }}" \
-            --notes "离线安装包（commit: ${{ github.sha }}）。用法：下载后执行 docker load -i hollymusic_docker_lxmusic-latest.tar.gz，然后 docker compose up -d。"
+      - name: Upload image tar.gz
+        uses: actions/upload-artifact@v4
+        with:
+          name: hollymusic-docker-image
+          path: hollymusic_docker_lxmusic-latest.tar.gz

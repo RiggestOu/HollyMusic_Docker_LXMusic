@@ -20,7 +20,7 @@ export function ParticleTuningPanel({ open, onClose }: { open: boolean; onClose:
   const tuningEnabled = useFxSettingsStore((s) => s.tuningEnabled)
   const toggleTuning = useFxSettingsStore((s) => s.toggleTuning)
   const update = useFxSettingsStore((s) => s.update)
-  const reset = useFxSettingsStore((s) => s.reset)
+  const reset = useFxSettingsStore((s) => s.resetAll)
 
   // Esc 关闭
   useEffect(() => {

@@ -149,17 +149,18 @@ const U = {
   flowBass: 66,
   flowMid: 67,
   rippleAmp: 68,
-  pulseBase: 69,
-  pulseBass: 70,
-  burstAmp: 71,
-  reliefAmp: 72,
-  sizeBase: 73,
-  sizeMax: 74,
-  brightBase: 75,
-  alphaBase: 76,
+  rippleBright: 69,
+  pulseBase: 70,
+  pulseBass: 71,
+  burstAmp: 72,
+  reliefAmp: 73,
+  sizeBase: 74,
+  sizeMax: 75,
+  brightBase: 76,
+  alphaBase: 77,
 } as const
 
-// 77 个 float 会被 WGSL 按 16 字节对齐补齐到 80（320 字节），与 struct Uniforms 的
+// 78 个 float 会被 WGSL 按 16 字节对齐补齐到 80（320 字节），与 struct Uniforms 的
 // 实际大小保持一致（静态校验脚本会比对二者，不一致会报错）。
 const UNIFORM_FLOATS = 80
 
@@ -218,6 +219,7 @@ struct Uniforms {
   flowBass: f32,
   flowMid: f32,
   rippleAmp: f32,
+  rippleBright: f32,
   pulseBase: f32,
   pulseBass: f32,
   burstAmp: f32,
@@ -377,9 +379,9 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(c.x, c.y, midDisp + trebleJ + bassBreath + depthZ);
   }
 
-  // 1 TUNNEL：筒壁 + 沿轴流动 + 整管自旋；bass 让筒径「收缩」（注意是负号）
+  // 1 TUNNEL：筒壁 + 沿轴流动；bass 让筒径「收缩」（注意是负号）（移除了整管自旋）
   if (s < 1.5) {
-    let angle = uv.x * 6.283185307179586 + t * 0.12;
+    let angle = uv.x * 6.283185307179586;
     let flow = fract(uv.y - t * 0.08 * (1.0 + u.bass * 0.55));
     let zPos = (flow - 0.5) * 9.0;
     let baseR = 2.0 - u.bass * 0.28 * K;
@@ -388,20 +390,14 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(cos(angle) * r, sin(angle) * r, zPos);
   }
 
-  // 2 ORBIT：球面（无扁率、无环）+ yaw 自转；treble 起毛刺、bass 整体膨胀
+  // 2 ORBIT：球面（无扁率、无环）+ treble 起毛刺、bass 整体膨胀（移除了 yaw 自转）
   if (s < 2.5) {
     let theta = uv.x * 6.283185307179586;
     let phi = (uv.y - 0.5) * 3.141592653589793;
     let trebFlare = snoise(vec3<f32>(theta * 1.5, phi * 1.5, t * 0.7)) * u.treble * 0.85 * K;
     let bassExpand = u.bass * 0.35 * K;
     let r = 2.2 * (1.0 + bassExpand) + trebFlare;
-    let x = r * cos(phi) * cos(theta);
-    let y = r * sin(phi);
-    let z = r * cos(phi) * sin(theta);
-    let yaw = t * 0.18;
-    let cy = cos(yaw);
-    let sy = sin(yaw);
-    return vec3<f32>(cy * x - sy * z, y, sy * x + cy * z);
+    return vec3<f32>(r * cos(phi) * cos(theta), r * sin(phi), r * cos(phi) * sin(theta));
   }
 
   // 3 VOID：无粒子 —— 几何推到远处，渲染阶段把 alpha 压 0（其原式即 vAlpha = 0）
@@ -409,13 +405,9 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(c.x * 0.01, c.y * 0.01, -90.0);
   }
 
-  // 4 VINYL RECORD：中心封面 + 黑胶沟槽 + 完整白边
+  // 4 VINYL RECORD：中心封面 + 黑胶沟槽 + 完整白边（移除了盘面 spin）
   if (s < 4.5) {
     let p = (uv - vec2<f32>(0.5, 0.5)) * 5.12;
-    let spin = t * 0.35;
-    let cs = cos(spin);
-    let sn = sin(spin);
-    let rp = vec2<f32>(cs * p.x - sn * p.y, sn * p.x + cs * p.y);
     let d = length(p);
     let recordR = 2.46;
     let coverR = 1.18;
@@ -433,7 +425,7 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
                + bassDrive * vinylN * 0.016 * K + tick * highDrive * 0.010;
     let inside = 1.0 - smoothstep(coverR - 0.012, coverR + 0.018, d);
     let radial = 1.0 + bassDrive * 0.012 + u.pulse * 0.026;
-    return vec3<f32>(rp.x * radial, rp.y * radial, select(zVinyl, zCover, inside > 0.02));
+    return vec3<f32>(p.x * radial, p.y * radial, select(zVinyl, zCover, inside > 0.02));
   }
 
   // 6 骷髅点云：坐标来自外部点云资源（setSkullPoints 写入 anchor 字段），
@@ -892,18 +884,19 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   // Mineradio 的区间只有 0.82~1.1、节拍项权重 0.016~0.16 —— 亮而不刺眼的关键。
   // 这里省掉了 edgeBoost 项：它依赖 Mineradio 的 AI 边缘/深度纹理，本项目没有。
   let maxRippleAmp = max(rip, 0.0);
+  // rippleBright 默认 1.0（原始亮度），调低可抑制涟漪抬升区域的过曝发白
   var vBright: f32;
   if (ro_u.preset > 8.5) {
-    vBright = 0.86 + maxRippleAmp * 0.52 + ro_u.energy * 0.045 + ro_u.pulse * 0.055;
+    vBright = 0.86 + maxRippleAmp * 0.52 * ro_u.rippleBright + ro_u.energy * 0.045 + ro_u.pulse * 0.055;
   } else if (ro_u.preset > 4.5) {
-    vBright = 0.94 + maxRippleAmp * 0.34 + ro_u.bass * 0.020
+    vBright = 0.94 + maxRippleAmp * 0.34 * ro_u.rippleBright + ro_u.bass * 0.020
             + ro_u.energy * 0.026 + ro_u.presetBurst * 0.025;
   } else if (ro_u.preset > 3.5) {
-    vBright = 0.94 + maxRippleAmp * 0.64 + ro_u.bass * 0.08
+    vBright = 0.94 + maxRippleAmp * 0.64 * ro_u.rippleBright + ro_u.bass * 0.08
             + edgeBoost * 0.12 + ro_u.energy * 0.05 + ro_u.pulse * 0.16 + ro_u.presetBurst * 0.16;
   } else {
     // 0.82 → ro_u.brightBase（实验调参可实时改）
-    vBright = ro_u.brightBase + maxRippleAmp * 0.55 + ro_u.bass * 0.10
+    vBright = ro_u.brightBase + maxRippleAmp * 0.55 * ro_u.rippleBright + ro_u.bass * 0.10
             + edgeBoost * 0.30 + ro_u.energy * 0.05 + ro_u.presetBurst * 0.40;
   }
   // 星河不参与预设亮度分组，保持稳定 1.0（闪烁已含在 starCol 里）
@@ -1035,7 +1028,7 @@ function readbackParticlesAndReport(
 function readbackCoverRow(device: Any, texture: Any, size: number): void {
   try {
     // bytesPerRow 必须是 256 的整数倍：一行 256 像素 × 4 字节 = 1024，恰好满足
-    const bytesPerRow = 256
+    const bytesPerRow = COVER_TEXTURE_SIZE * 4
     const buffer = device.createBuffer({
       size: bytesPerRow,
       usage: BUFFER_USAGE.COPY_DST | BUFFER_USAGE.MAP_READ,
@@ -1174,7 +1167,7 @@ export async function createWebGPURenderer(
 
     const particleBuffer = device.createBuffer({
       size: initial.byteLength,
-      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
     })
     device.queue.writeBuffer(particleBuffer, 0, initial)
 
@@ -1372,6 +1365,7 @@ export async function createWebGPURenderer(
       uniformF32[U.flowBass] = fx.flowBass
       uniformF32[U.flowMid] = fx.flowMid
       uniformF32[U.rippleAmp] = fx.rippleAmp
+      uniformF32[U.rippleBright] = fx.rippleBright
       uniformF32[U.pulseBase] = fx.pulseBase
       uniformF32[U.pulseBass] = fx.pulseBass
       uniformF32[U.burstAmp] = fx.burstAmp

@@ -25,6 +25,7 @@ export interface FxSettings {
   flowBass: number
   flowMid: number
   rippleAmp: number
+  rippleBright: number
   pulseBase: number
   pulseBass: number
   burstAmp: number
@@ -41,7 +42,7 @@ export const DEFAULT_FX: FxSettings = {
   depth: 0.2,
   twist: 0,
   scatter: 0,
-  bloom: 0.62,
+  bloom: 3.0,
   edge: 1,
   bgFade: 0.2,
   // 实验调参默认值（与 lib/client/particle/types.ts 的 DEFAULT_FX 保持一致）
@@ -50,6 +51,7 @@ export const DEFAULT_FX: FxSettings = {
   flowBass: 1.6,
   flowMid: 0.65,
   rippleAmp: 0.13,
+  rippleBright: 1.0,
   pulseBase: 0.03,
   pulseBass: 0.9,
   burstAmp: 1.6,
@@ -67,6 +69,7 @@ const TUNING_RANGE: Record<TuningKey, [number, number]> = {
   flowBass: [0, 5],
   flowMid: [0, 5],
   rippleAmp: [0, 8],
+  rippleBright: [0, 5],
   pulseBase: [0, 5],
   pulseBass: [0, 5],
   burstAmp: [0, 10],
@@ -150,7 +153,10 @@ interface FxSettingsState {
   tuningEnabled: TuningEnabled
   update: (partial: Partial<FxSettings>) => void
   toggleTuning: (key: TuningKey, on: boolean) => void
-  reset: () => void
+  /** 仅重置动效参数（bloom / intensity 等 8 项），不影响调参面板的 14 项。 */
+  resetFx: () => void
+  /** 重置全部：动效参数 + 调参面板全部项。 */
+  resetAll: () => void
   setBackendPreference: (pref: BackendPreference) => void
 }
 
@@ -176,7 +182,7 @@ export const useFxSettingsStore = create<FxSettingsState>()(
         next.depth = Math.max(0, Math.min(2.0, next.depth))
         next.twist = Math.max(0, Math.min(1.0, next.twist))
         next.scatter = Math.max(0, Math.min(1.0, next.scatter))
-        next.bloom = Math.max(0, Math.min(3.0, next.bloom))
+        next.bloom = Math.max(0, Math.min(10.0, next.bloom))
         next.edge = Math.max(0, Math.min(3.0, next.edge))
         next.bgFade = Math.max(0, Math.min(2.0, next.bgFade))
         // 实验调参项：按各自区间钳位
@@ -199,6 +205,30 @@ export const useFxSettingsStore = create<FxSettingsState>()(
       }
     },
     reset: () => {
+      persist(DEFAULT_FX)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('hm-fx-changed'))
+      }
+      set({ fx: { ...DEFAULT_FX }, tuningEnabled: defaultTuningEnabled() })
+    },
+    /** 仅重置动效参数（bloom / intensity 等 8 项），不影响调参面板。 */
+    resetFx: () => {
+      const resetFxBx = { ...DEFAULT_FX }
+      // 只保留动效参数，保留调参项的当前值
+      for (const k of TUNING_KEYS) {
+        delete (resetFxBx as Record<string, unknown>)[k]
+      }
+      set((s) => {
+        const next = { ...s.fx, ...resetFxBx }
+        persist(next)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('hm-fx-changed'))
+        }
+        return { fx: next }
+      })
+    },
+    /** 重置全部：动效参数 + 调参面板全部项。 */
+    resetAll: () => {
       persist(DEFAULT_FX)
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('hm-fx-changed'))

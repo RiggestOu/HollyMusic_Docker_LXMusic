@@ -64,7 +64,7 @@ const VERTEX_SHADER = /* glsl */ `
   uniform float uIntensity, uSpeed, uDepth, uTwist, uScatter, uBloom, uEdge, uBgFade;
   // 实验调参（2026-09-15）：原硬编码常数提升为 uniform，默认值 = 原字面量
   uniform float uFlowBase, uFlowBass, uFlowMid;
-  uniform float uRippleAmp, uPulseBase, uPulseBass, uBurstAmp;
+  uniform float uRippleAmp, uRippleBright, uPulseBase, uPulseBass, uBurstAmp;
   uniform float uReliefAmp, uSizeBase, uSizeMax, uBrightBase, uAlphaBase;
   uniform float uPreset, uPresetBurst;
   uniform vec3 uColorA, uColorB;
@@ -216,9 +216,9 @@ const VERTEX_SHADER = /* glsl */ `
       return vec3(c.x, c.y, midDisp + trebleJ + bassBreath + depthZ);
     }
 
-    // 1 TUNNEL：筒壁 + 沿轴流动 + 整管自旋；bass 让筒径「收缩」（注意是负号）
+    // 1 TUNNEL：筒壁 + 沿轴流动；bass 让筒径「收缩」（注意是负号）（移除了整管自旋）
     if (s < 1.5) {
-      float angle = uv.x * TWO_PI + t * 0.12;
+      float angle = uv.x * TWO_PI;
       float flow = fract(uv.y - t * 0.08 * (1.0 + uBass * 0.55));
       float zPos = (flow - 0.5) * 9.0;
       float baseR = 2.0 - uBass * 0.28 * K;
@@ -227,20 +227,14 @@ const VERTEX_SHADER = /* glsl */ `
       return vec3(cos(angle) * r, sin(angle) * r, zPos);
     }
 
-    // 2 ORBIT：球面（无扁率、无环）+ yaw 自转；treble 起毛刺、bass 整体膨胀
+    // 2 ORBIT：球面（无扁率、无环）+ treble 起毛刺、bass 整体膨胀（移除了 yaw 自转）
     if (s < 2.5) {
       float theta = uv.x * TWO_PI;
       float phi = (uv.y - 0.5) * PI;
       float trebFlare = snoise(vec3(theta * 1.5, phi * 1.5, t * 0.7)) * uTreble * 0.85 * K;
       float bassExpand = uBass * 0.35 * K;
       float r = 2.2 * (1.0 + bassExpand) + trebFlare;
-      float x = r * cos(phi) * cos(theta);
-      float y = r * sin(phi);
-      float z = r * cos(phi) * sin(theta);
-      float yaw = t * 0.18;
-      float cy = cos(yaw);
-      float sy = sin(yaw);
-      return vec3(cy * x - sy * z, y, sy * x + cy * z);
+      return vec3(r * cos(phi) * cos(theta), r * sin(phi), r * cos(phi) * sin(theta));
     }
 
     // 3 VOID：无粒子 —— 几何推到远处，渲染阶段把 alpha 压 0（其原式即 vAlpha = 0）
@@ -248,13 +242,9 @@ const VERTEX_SHADER = /* glsl */ `
       return vec3(c.x * 0.01, c.y * 0.01, -90.0);
     }
 
-    // 4 VINYL RECORD：中心封面 + 黑胶沟槽 + 完整白边
+    // 4 VINYL RECORD：中心封面 + 黑胶沟槽 + 完整白边（移除了盘面 spin）
     if (s < 4.5) {
       vec2 p = (uv - vec2(0.5)) * 5.12;
-      float spin = t * 0.35;
-      float cs = cos(spin);
-      float sn = sin(spin);
-      vec2 rp = vec2(cs * p.x - sn * p.y, sn * p.x + cs * p.y);
       float d = length(p);
       float recordR = 2.46;
       float coverR = 1.18;
@@ -272,7 +262,7 @@ const VERTEX_SHADER = /* glsl */ `
                    + bassDrive * vinylN * 0.016 * K + tick * highDrive * 0.010;
       float inside = 1.0 - smoothstep(coverR - 0.012, coverR + 0.018, d);
       float radial = 1.0 + bassDrive * 0.012 + uPulse * 0.026;
-      return vec3(rp.x * radial, rp.y * radial, inside > 0.02 ? zCover : zVinyl);
+      return vec3(p.x * radial, p.y * radial, inside > 0.02 ? zCover : zVinyl);
     }
 
     // 6 骷髅点云：坐标来自外部点云资源（由 setSkullPoints 写入 anchor 槽位），
@@ -663,15 +653,15 @@ const VERTEX_SHADER = /* glsl */ `
     float maxRippleAmp = max(ripple, 0.0);
     float vBright;
     if (uPreset > 8.5) {
-      vBright = 0.86 + maxRippleAmp * 0.52 + uEnergy * 0.045 + uPulse * 0.055;
+      vBright = 0.86 + maxRippleAmp * 0.52 * uRippleBright + uEnergy * 0.045 + uPulse * 0.055;
     } else if (uPreset > 4.5) {
-      vBright = 0.94 + maxRippleAmp * 0.34 + uBass * 0.020
+      vBright = 0.94 + maxRippleAmp * 0.34 * uRippleBright + uBass * 0.020
               + uEnergy * 0.026 + uPresetBurst * 0.025;
     } else if (uPreset > 3.5) {
-      vBright = 0.94 + maxRippleAmp * 0.64 + uBass * 0.08
+      vBright = 0.94 + maxRippleAmp * 0.64 * uRippleBright + uBass * 0.08
               + edgeBoost * 0.12 + uEnergy * 0.05 + uPulse * 0.16 + uPresetBurst * 0.16;
     } else {
-      vBright = uBrightBase + maxRippleAmp * 0.55 + uBass * 0.10
+      vBright = uBrightBase + maxRippleAmp * 0.55 * uRippleBright + uBass * 0.10
               + edgeBoost * 0.30 + uEnergy * 0.05 + uPresetBurst * 0.40;
     }
     // 星河不参与预设亮度分组，保持稳定的 1.0（闪烁已含在 starCol 里）
@@ -853,6 +843,7 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     uFlowBass: { value: DEFAULT_FX.flowBass },
     uFlowMid: { value: DEFAULT_FX.flowMid },
     uRippleAmp: { value: DEFAULT_FX.rippleAmp },
+    uRippleBright: { value: DEFAULT_FX.rippleBright },
     uPulseBase: { value: DEFAULT_FX.pulseBase },
     uPulseBass: { value: DEFAULT_FX.pulseBass },
     uBurstAmp: { value: DEFAULT_FX.burstAmp },
@@ -948,6 +939,7 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
       uniforms.uFlowBass.value = next.flowBass
       uniforms.uFlowMid.value = next.flowMid
       uniforms.uRippleAmp.value = next.rippleAmp
+      uniforms.uRippleBright.value = next.rippleBright
       uniforms.uPulseBase.value = next.pulseBase
       uniforms.uPulseBass.value = next.pulseBass
       uniforms.uBurstAmp.value = next.burstAmp

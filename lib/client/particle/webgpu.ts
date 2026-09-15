@@ -149,18 +149,17 @@ const U = {
   flowBass: 66,
   flowMid: 67,
   rippleAmp: 68,
-  rippleBright: 69,
-  pulseBase: 70,
-  pulseBass: 71,
-  burstAmp: 72,
-  reliefAmp: 73,
-  sizeBase: 74,
-  sizeMax: 75,
-  brightBase: 76,
-  alphaBase: 77,
+  pulseBase: 69,
+  pulseBass: 70,
+  burstAmp: 71,
+  reliefAmp: 72,
+  sizeBase: 73,
+  sizeMax: 74,
+  brightBase: 75,
+  alphaBase: 76,
 } as const
 
-// 78 个 float 会被 WGSL 按 16 字节对齐补齐到 80（320 字节），与 struct Uniforms 的
+// 77 个 float 会被 WGSL 按 16 字节对齐补齐到 80（320 字节），与 struct Uniforms 的
 // 实际大小保持一致（静态校验脚本会比对二者，不一致会报错）。
 const UNIFORM_FLOATS = 80
 
@@ -219,7 +218,6 @@ struct Uniforms {
   flowBass: f32,
   flowMid: f32,
   rippleAmp: f32,
-  rippleBright: f32,
   pulseBase: f32,
   pulseBass: f32,
   burstAmp: f32,
@@ -364,10 +362,15 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
   let c = vec2<f32>((uv.x - 0.5) * plane, (uv.y - 0.5) * plane);
 
   // 0 SILK：平面 + 中/高/低频驱动的 Z 起伏（midN / midMask / trebleJ / bassBreath 原式）
+  // 静息时冻结时间，避免封面自转或起伏
+  var st = t;
+  if (s < 0.5 && u.bass == 0.0 && u.mid == 0.0 && u.treble == 0.0) {
+    st = 0.0;
+  }
   if (s < 0.5) {
-    let midN = snoise(vec3<f32>(c.x * 1.4, c.y * 1.4, t * 0.55)) * 0.6
-             + snoise(vec3<f32>(c.x * 2.8 + 5.0, c.y * 2.8 - 3.0, t * 0.85)) * 0.4;
-    let midMask = 0.55 + 0.45 * snoise(vec3<f32>(c.x * 0.4, c.y * 0.4, t * 0.18));
+    let midN = snoise(vec3<f32>(c.x * 1.4, c.y * 1.4, st * 0.55)) * 0.6
+             + snoise(vec3<f32>(c.x * 2.8 + 5.0, c.y * 2.8 - 3.0, st * 0.85)) * 0.4;
+    let midMask = 0.55 + 0.45 * snoise(vec3<f32>(c.x * 0.4, c.y * 0.4, st * 0.18));
     let midDisp = midN * u.mid * 0.55 * midMask * K;
     let trebleJ = snoise(vec3<f32>(c.x * 6.5, c.y * 6.5, t * 3.5 + seed * 4.0))
                 * u.treble * 0.18 * K;
@@ -713,12 +716,17 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // 封面形态 Z 浮雕（webgl2 的 relief，:552-561 同式）：
   // WGSL 的 presetTarget 里 s<0.5 分支从 compute 走不到（preset<0.5 走了封面分支），
   // 缺这一项会让默认封面预设比 WebGL 明显偏平 —— 这也是「与 WebGL 不一致」的一环。
+  // 静息时冻结噪声相位，避免封面自转/起伏
   let mCover = clamp(u.coverMix, 0.0, 1.0) * u.hasCover;
   if (!isStar && u.preset < 0.5 && mCover > 0.001) {
-    let n1 = snoise(vec3<f32>(base.xy * 1.4, u.time * 0.55));
-    let n2 = snoise(vec3<f32>(base.xy * 2.8 + vec2<f32>(5.0), u.time * 0.85));
-    let n3 = snoise(vec3<f32>(base.xy * 6.5, u.time * 3.5 + p.seed * 4.0));
-    let breath = snoise(vec3<f32>(base.xy * 0.35, u.time * 0.40));
+    var staticT = u.time;
+    if (u.bass == 0.0 && u.mid == 0.0 && u.treble == 0.0) {
+      staticT = 0.0;
+    }
+    let n1 = snoise(vec3<f32>(base.xy * 1.4, staticT * 0.55));
+    let n2 = snoise(vec3<f32>(base.xy * 2.8 + vec2<f32>(5.0), staticT * 0.85));
+    let n3 = snoise(vec3<f32>(base.xy * 6.5, staticT * 3.5 + p.seed * 4.0));
+    let breath = snoise(vec3<f32>(base.xy * 0.35, staticT * 0.40));
     let relief = (n1 * 0.60 + n2 * 0.40) * u.mid * 1.15
                + n3 * u.treble * 0.50 + breath * u.bass * 1.25;
     tgt = tgt + vec3<f32>(0.0, 0.0, relief * mCover * u.reliefAmp);
@@ -884,19 +892,18 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   // Mineradio 的区间只有 0.82~1.1、节拍项权重 0.016~0.16 —— 亮而不刺眼的关键。
   // 这里省掉了 edgeBoost 项：它依赖 Mineradio 的 AI 边缘/深度纹理，本项目没有。
   let maxRippleAmp = max(rip, 0.0);
-  // rippleBright 默认 1.0（原始亮度），调低可抑制涟漪抬升区域的过曝发白
   var vBright: f32;
   if (ro_u.preset > 8.5) {
-    vBright = 0.86 + maxRippleAmp * 0.52 * ro_u.rippleBright + ro_u.energy * 0.045 + ro_u.pulse * 0.055;
+    vBright = 0.86 + maxRippleAmp * 0.52 + ro_u.energy * 0.045 + ro_u.pulse * 0.055;
   } else if (ro_u.preset > 4.5) {
-    vBright = 0.94 + maxRippleAmp * 0.34 * ro_u.rippleBright + ro_u.bass * 0.020
+    vBright = 0.94 + maxRippleAmp * 0.34 + ro_u.bass * 0.020
             + ro_u.energy * 0.026 + ro_u.presetBurst * 0.025;
   } else if (ro_u.preset > 3.5) {
-    vBright = 0.94 + maxRippleAmp * 0.64 * ro_u.rippleBright + ro_u.bass * 0.08
+    vBright = 0.94 + maxRippleAmp * 0.64 + ro_u.bass * 0.08
             + edgeBoost * 0.12 + ro_u.energy * 0.05 + ro_u.pulse * 0.16 + ro_u.presetBurst * 0.16;
   } else {
     // 0.82 → ro_u.brightBase（实验调参可实时改）
-    vBright = ro_u.brightBase + maxRippleAmp * 0.55 * ro_u.rippleBright + ro_u.bass * 0.10
+    vBright = ro_u.brightBase + maxRippleAmp * 0.55 + ro_u.bass * 0.10
             + edgeBoost * 0.30 + ro_u.energy * 0.05 + ro_u.presetBurst * 0.40;
   }
   // 星河不参与预设亮度分组，保持稳定 1.0（闪烁已含在 starCol 里）
@@ -1365,7 +1372,6 @@ export async function createWebGPURenderer(
       uniformF32[U.flowBass] = fx.flowBass
       uniformF32[U.flowMid] = fx.flowMid
       uniformF32[U.rippleAmp] = fx.rippleAmp
-      uniformF32[U.rippleBright] = fx.rippleBright
       uniformF32[U.pulseBase] = fx.pulseBase
       uniformF32[U.pulseBass] = fx.pulseBass
       uniformF32[U.burstAmp] = fx.burstAmp

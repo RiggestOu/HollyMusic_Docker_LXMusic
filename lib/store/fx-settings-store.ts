@@ -25,7 +25,6 @@ export interface FxSettings {
   flowBass: number
   flowMid: number
   rippleAmp: number
-  rippleBright: number
   pulseBase: number
   pulseBass: number
   burstAmp: number
@@ -51,7 +50,6 @@ export const DEFAULT_FX: FxSettings = {
   flowBass: 1.6,
   flowMid: 0.65,
   rippleAmp: 0.13,
-  rippleBright: 1.0,
   pulseBase: 0.03,
   pulseBass: 0.9,
   burstAmp: 1.6,
@@ -69,7 +67,6 @@ const TUNING_RANGE: Record<TuningKey, [number, number]> = {
   flowBass: [0, 5],
   flowMid: [0, 5],
   rippleAmp: [0, 8],
-  rippleBright: [0, 5],
   pulseBase: [0, 5],
   pulseBass: [0, 5],
   burstAmp: [0, 10],
@@ -182,7 +179,7 @@ export const useFxSettingsStore = create<FxSettingsState>()(
         next.depth = Math.max(0, Math.min(2.0, next.depth))
         next.twist = Math.max(0, Math.min(1.0, next.twist))
         next.scatter = Math.max(0, Math.min(1.0, next.scatter))
-        next.bloom = Math.max(0, Math.min(10.0, next.bloom))
+        next.bloom = Math.max(0, Math.min(100.0, next.bloom))
         next.edge = Math.max(0, Math.min(3.0, next.edge))
         next.bgFade = Math.max(0, Math.min(2.0, next.bgFade))
         // 实验调参项：按各自区间钳位

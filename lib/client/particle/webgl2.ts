@@ -653,15 +653,15 @@ const VERTEX_SHADER = /* glsl */ `
     float maxRippleAmp = max(ripple, 0.0);
     float vBright;
     if (uPreset > 8.5) {
-      vBright = 0.86 + maxRippleAmp * 0.52 * uRippleBright + uEnergy * 0.045 + uPulse * 0.055;
+      vBright = 0.86 + maxRippleAmp * 0.52 + uEnergy * 0.045 + uPulse * 0.055;
     } else if (uPreset > 4.5) {
-      vBright = 0.94 + maxRippleAmp * 0.34 * uRippleBright + uBass * 0.020
+      vBright = 0.94 + maxRippleAmp * 0.34 + uBass * 0.020
               + uEnergy * 0.026 + uPresetBurst * 0.025;
     } else if (uPreset > 3.5) {
-      vBright = 0.94 + maxRippleAmp * 0.64 * uRippleBright + uBass * 0.08
+      vBright = 0.94 + maxRippleAmp * 0.64 + uBass * 0.08
               + edgeBoost * 0.12 + uEnergy * 0.05 + uPulse * 0.16 + uPresetBurst * 0.16;
     } else {
-      vBright = uBrightBase + maxRippleAmp * 0.55 * uRippleBright + uBass * 0.10
+      vBright = uBrightBase + maxRippleAmp * 0.55 + uBass * 0.10
               + edgeBoost * 0.30 + uEnergy * 0.05 + uPresetBurst * 0.40;
     }
     // 星河不参与预设亮度分组，保持稳定的 1.0（闪烁已含在 starCol 里）
@@ -843,7 +843,6 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     uFlowBass: { value: DEFAULT_FX.flowBass },
     uFlowMid: { value: DEFAULT_FX.flowMid },
     uRippleAmp: { value: DEFAULT_FX.rippleAmp },
-    uRippleBright: { value: DEFAULT_FX.rippleBright },
     uPulseBase: { value: DEFAULT_FX.pulseBase },
     uPulseBass: { value: DEFAULT_FX.pulseBass },
     uBurstAmp: { value: DEFAULT_FX.burstAmp },
@@ -939,7 +938,6 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
       uniforms.uFlowBass.value = next.flowBass
       uniforms.uFlowMid.value = next.flowMid
       uniforms.uRippleAmp.value = next.rippleAmp
-      uniforms.uRippleBright.value = next.rippleBright
       uniforms.uPulseBase.value = next.pulseBase
       uniforms.uPulseBass.value = next.pulseBass
       uniforms.uBurstAmp.value = next.burstAmp

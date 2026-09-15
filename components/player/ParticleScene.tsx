@@ -247,7 +247,7 @@ export function ParticleScene({
       if (basis) {
         const [right, up] = basis()
         for (let i = 0; i < 3; i++) {
-          rig.target[i] += (-right[i] * dx + up[i] * dy) * k
+          rig.target[i] += (right[i] * dx - up[i] * dy) * k
         }
       }
     }
@@ -630,9 +630,6 @@ export function ParticleScene({
               'target=', target,
             )
           }
-
-          // 静息时极缓慢自转，避免画面完全静止
-          if (mode === 'none' && touchMode === 'none') rig.theta += 0.00035
 
           // ---- 频谱响应整形：逐式对齐 Mineradio 的 11-main-loop 管线 ----
           // 其送进着色器的并不是原始分析值，而是经过「缩放 + 上限 + 预设分组压缩」后的值，

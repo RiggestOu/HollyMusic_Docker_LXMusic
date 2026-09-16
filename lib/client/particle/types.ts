@@ -91,6 +91,8 @@ export interface FxSettings {
   flowMid: number
   /** 涟漪抬升位移 */
   rippleAmp: number
+  /** 涟漪亮度系数（原硬编码 0.52/0.34/0.64/0.55，可调） */
+  rippleBright: number
   /** 节拍跳动位移基数（配合 pulseBass） */
   pulseBase: number
   /** 节拍跳动位移·低频系数 */
@@ -124,6 +126,7 @@ export const DEFAULT_FX: FxSettings = {
   flowBass: 1.6,
   flowMid: 0.65,
   rippleAmp: 0.13,
+  rippleBright: 1.0,
   pulseBase: 0.03,
   pulseBass: 0.9,
   burstAmp: 1.6,
@@ -144,6 +147,7 @@ export const TUNING_KEYS = [
   'flowBass',
   'flowMid',
   'rippleAmp',
+  'rippleBright',
   'pulseBase',
   'pulseBass',
   'burstAmp',
@@ -163,6 +167,7 @@ export const TUNING_META: Record<TuningKey, { label: string; min: number; max: n
   flowBass: { label: '流场·低频', min: 0, max: 5, step: 0.01, desc: '流场位移中 bass 的系数' },
   flowMid: { label: '流场·中频', min: 0, max: 5, step: 0.01, desc: '流场位移中 mid 的系数' },
   rippleAmp: { label: '涟漪抬升', min: 0, max: 8, step: 0.01, desc: '点击涟漪的 Z 轴抬升量' },
+  rippleBright: { label: '涟漪亮度', min: 0, max: 5, step: 0.01, desc: '涟漪区域亮度系数（发白时调低）' },
   pulseBase: { label: '节拍·基数', min: 0, max: 5, step: 0.01, desc: '每拍径向跳动的基础位移' },
   pulseBass: { label: '节拍·低频', min: 0, max: 5, step: 0.01, desc: '节拍跳动中 bass 的系数' },
   burstAmp: { label: '切换爆散', min: 0, max: 10, step: 0.01, desc: '切预设时向外炸开的位移' },

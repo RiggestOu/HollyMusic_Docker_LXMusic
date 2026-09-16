@@ -149,17 +149,18 @@ const U = {
   flowBass: 66,
   flowMid: 67,
   rippleAmp: 68,
-  pulseBase: 69,
-  pulseBass: 70,
-  burstAmp: 71,
-  reliefAmp: 72,
-  sizeBase: 73,
-  sizeMax: 74,
-  brightBase: 75,
-  alphaBase: 76,
+  rippleBright: 69,
+  pulseBase: 70,
+  pulseBass: 71,
+  burstAmp: 72,
+  reliefAmp: 73,
+  sizeBase: 74,
+  sizeMax: 75,
+  brightBase: 76,
+  alphaBase: 77,
 } as const
 
-// 77 个 float 会被 WGSL 按 16 字节对齐补齐到 80（320 字节），与 struct Uniforms 的
+// 78 个 float 会被 WGSL 按 16 字节对齐补齐到 80（320 字节），与 struct Uniforms 的
 // 实际大小保持一致（静态校验脚本会比对二者，不一致会报错）。
 const UNIFORM_FLOATS = 80
 
@@ -218,6 +219,7 @@ struct Uniforms {
   flowBass: f32,
   flowMid: f32,
   rippleAmp: f32,
+  rippleBright: f32,
   pulseBase: f32,
   pulseBass: f32,
   burstAmp: f32,
@@ -894,16 +896,16 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   let maxRippleAmp = max(rip, 0.0);
   var vBright: f32;
   if (ro_u.preset > 8.5) {
-    vBright = 0.86 + maxRippleAmp * 0.52 + ro_u.energy * 0.045 + ro_u.pulse * 0.055;
+    vBright = 0.86 + maxRippleAmp * 0.52 * ro_u.rippleBright + ro_u.energy * 0.045 + ro_u.pulse * 0.055;
   } else if (ro_u.preset > 4.5) {
-    vBright = 0.94 + maxRippleAmp * 0.34 + ro_u.bass * 0.020
+    vBright = 0.94 + maxRippleAmp * 0.34 * ro_u.rippleBright + ro_u.bass * 0.020
             + ro_u.energy * 0.026 + ro_u.presetBurst * 0.025;
   } else if (ro_u.preset > 3.5) {
-    vBright = 0.94 + maxRippleAmp * 0.64 + ro_u.bass * 0.08
+    vBright = 0.94 + maxRippleAmp * 0.64 * ro_u.rippleBright + ro_u.bass * 0.08
             + edgeBoost * 0.12 + ro_u.energy * 0.05 + ro_u.pulse * 0.16 + ro_u.presetBurst * 0.16;
   } else {
     // 0.82 → ro_u.brightBase（实验调参可实时改）
-    vBright = ro_u.brightBase + maxRippleAmp * 0.55 + ro_u.bass * 0.10
+    vBright = ro_u.brightBase + maxRippleAmp * 0.55 * ro_u.rippleBright + ro_u.bass * 0.10
             + edgeBoost * 0.30 + ro_u.energy * 0.05 + ro_u.presetBurst * 0.40;
   }
   // 星河不参与预设亮度分组，保持稳定 1.0（闪烁已含在 starCol 里）
@@ -918,7 +920,10 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   // 这是 Mineradio 的 VOID 原始语义；实测把它画成包围相机的壳层会让加法混合整屏曝白。
   if (voidPreset && !isStar) { alpha = 0.0; }
   // 光晕强度：以默认值 0.62 为 1.0 基准，保证出厂观感不变
-  alpha *= ro_u.bloom / 0.62;
+  // bloom 同时作用于亮度和 alpha，使高值时整体变亮而非仅变透明
+  let bloomScale = ro_u.bloom / 0.62;
+  out.glow *= bloomScale;
+  alpha *= bloomScale;
   out.alpha = alpha;
   out.ripple = select(clamp(rip, 0.0, 1.0), 0.0, isStar);
   return out;
@@ -1372,6 +1377,7 @@ export async function createWebGPURenderer(
       uniformF32[U.flowBass] = fx.flowBass
       uniformF32[U.flowMid] = fx.flowMid
       uniformF32[U.rippleAmp] = fx.rippleAmp
+      uniformF32[U.rippleBright] = fx.rippleBright
       uniformF32[U.pulseBase] = fx.pulseBase
       uniformF32[U.pulseBass] = fx.pulseBass
       uniformF32[U.burstAmp] = fx.burstAmp

@@ -653,15 +653,15 @@ const VERTEX_SHADER = /* glsl */ `
     float maxRippleAmp = max(ripple, 0.0);
     float vBright;
     if (uPreset > 8.5) {
-      vBright = 0.86 + maxRippleAmp * 0.52 + uEnergy * 0.045 + uPulse * 0.055;
+      vBright = 0.86 + maxRippleAmp * 0.52 * uRippleBright + uEnergy * 0.045 + uPulse * 0.055;
     } else if (uPreset > 4.5) {
-      vBright = 0.94 + maxRippleAmp * 0.34 + uBass * 0.020
+      vBright = 0.94 + maxRippleAmp * 0.34 * uRippleBright + uBass * 0.020
               + uEnergy * 0.026 + uPresetBurst * 0.025;
     } else if (uPreset > 3.5) {
-      vBright = 0.94 + maxRippleAmp * 0.64 + uBass * 0.08
+      vBright = 0.94 + maxRippleAmp * 0.64 * uRippleBright + uBass * 0.08
               + edgeBoost * 0.12 + uEnergy * 0.05 + uPulse * 0.16 + uPresetBurst * 0.16;
     } else {
-      vBright = uBrightBase + maxRippleAmp * 0.55 + uBass * 0.10
+      vBright = uBrightBase + maxRippleAmp * 0.55 * uRippleBright + uBass * 0.10
               + edgeBoost * 0.30 + uEnergy * 0.05 + uPresetBurst * 0.40;
     }
     // 星河不参与预设亮度分组，保持稳定的 1.0（闪烁已含在 starCol 里）
@@ -671,7 +671,10 @@ const VERTEX_SHADER = /* glsl */ `
                     * mix(1.0, 0.94, m);
     vAlpha = isStar ? twinkle * 0.75 : bodyAlpha;
     // 光晕强度：以默认值 0.62 为 1.0 基准，保证出厂观感不变
-    vAlpha *= uBloom / 0.62;
+    // bloom 同时作用于亮度和 alpha，使高值时整体变亮而非仅变透明
+    float bloomScale = uBloom / 0.62;
+    vGlow *= bloomScale;
+    vAlpha *= bloomScale;
     // 虚空预设（索引 3）：隐去全部预设粒子，只留星河背景。
     // 这是 Mineradio 的 VOID 原始语义。实测把它画成一个包围相机的壳层时，
     // 加法混合会整屏曝白（mean 亮度 254/255）—— 也就是「屏幕都变白色了」的根因。

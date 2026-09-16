@@ -35,7 +35,7 @@ const SLIDERS: SliderDef[] = [
   { key: 'depth', label: '画面景深', min: 0, max: 2.0, step: 0.01, desc: '浮雕强度（depth 纹理 → Z 轴起伏）' },
   { key: 'twist', label: '粒子扭曲', min: 0, max: 1.0, step: 0.01, desc: '滚筒类预设的视轴旋转形变' },
   { key: 'scatter', label: '离散感', min: 0, max: 1.0, step: 0.01, desc: '粒子沿径向随机外扩' },
-  { key: 'bloom', label: '光晕强度', min: 0, max: 100.0, step: 0.01, desc: '粒子亮度倍率（默认 3.0，以原 0.62 为基准 1.0）' },
+  { key: 'bloom', label: '光晕强度', min: 0, max: 3.0, step: 0.01, desc: '粒子亮度倍率（默认 1.0）' },
   { key: 'edge', label: '轮廓高亮', min: 0, max: 3.0, step: 0.01, desc: '边缘纹理 G 通道 → 轮廓发光强度' },
   { key: 'bgFade', label: '背景压暗', min: 0, max: 2.0, step: 0.01, desc: '背景层（星河）透明度补量' },
 ]

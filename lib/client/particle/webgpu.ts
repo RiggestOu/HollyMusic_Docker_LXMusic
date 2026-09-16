@@ -813,7 +813,8 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     sz = clamp(depthSize * (0.90 + ringDrive * 0.62), 1.05, 3.90);
   } else {
     // audioBoost 在 Mineradio 里作用在尺寸上（涟漪/节拍让粒子变大），不是亮度
-    let audioBoost = 1.0 + rip * 0.7 + edgeBoost * 0.55 + ro_u.pulse * 0.30 + ro_u.presetBurst * 0.5;
+    let rippleSizeBoost = rip * ro_u.rippleBright * 0.7;
+    let audioBoost = 1.0 + rippleSizeBoost + edgeBoost * 0.55 + ro_u.pulse * 0.30 + ro_u.presetBurst * 0.5;
     // 上限 4.95 → ro_u.sizeMax（实验调参可实时改）
     sz = clamp(depthSize * audioBoost, 1.05, ro_u.sizeMax);
   }
@@ -919,7 +920,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   // 虚空预设（索引 3）：隐去全部预设粒子，只留星河背景。
   // 这是 Mineradio 的 VOID 原始语义；实测把它画成包围相机的壳层会让加法混合整屏曝白。
   if (voidPreset && !isStar) { alpha = 0.0; }
-  // 光晕强度：以默认值 0.62 为 1.0 基准，保证出厂观感不变
+  // 光晕强度：以默认值 1.0 为 1.0 基准，保证出厂观感不变
   // bloom 同时作用于亮度和 alpha，使高值时整体变亮而非仅变透明
   let bloomScale = ro_u.bloom / 0.62;
   out.glow *= bloomScale;

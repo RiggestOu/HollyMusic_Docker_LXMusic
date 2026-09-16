@@ -70,9 +70,9 @@ export interface FxSettings {
   twist: number
   /** 离散感 0~0.5，默认 0 */
   scatter: number
-  /** 光晕强度 0~1.6，默认 0.62（以此为 1.0 基准） */
+  /** 光晕强度 0~3，默认 1.0 */
   bloom: number
-  /** 轮廓高亮开关，默认开 */
+  /** 轮廓高亮 0~3，默认 0.25 */
   edge: number
   /** 背景压暗 0~1.2，默认 0.20 */
   bgFade: number
@@ -101,7 +101,7 @@ export interface FxSettings {
   burstAmp: number
   /** 封面形态 Z 浮雕强度倍率 */
   reliefAmp: number
-  /** 点尺寸基数（Mineradio depthSize = 36 / 视深） */
+  /** 点尺寸基数（Mineradio depthSize = sizeBase / 视深） */
   sizeBase: number
   /** 点尺寸上限（px） */
   sizeMax: number
@@ -117,8 +117,8 @@ export const DEFAULT_FX: FxSettings = {
   depth: 0.2,
   twist: 0,
   scatter: 0,
-  bloom: 3.0,
-  edge: 1,
+  bloom: 1.0,
+  edge: 0.25,
   bgFade: 0.2,
   // 实验调参默认值（= 原着色器字面量；2026-09-15 按用户实测观感调整过 4 项）
   spectrumAmp: 0.06,
@@ -131,7 +131,7 @@ export const DEFAULT_FX: FxSettings = {
   pulseBass: 0.9,
   burstAmp: 1.6,
   reliefAmp: 1.0,
-  sizeBase: 36.0,
+  sizeBase: 100.0,
   sizeMax: 4.95,
   brightBase: 0.7,
   alphaBase: 0.55,
@@ -172,7 +172,7 @@ export const TUNING_META: Record<TuningKey, { label: string; min: number; max: n
   pulseBass: { label: '节拍·低频', min: 0, max: 5, step: 0.01, desc: '节拍跳动中 bass 的系数' },
   burstAmp: { label: '切换爆散', min: 0, max: 10, step: 0.01, desc: '切预设时向外炸开的位移' },
   reliefAmp: { label: '封面浮雕', min: 0, max: 3, step: 0.01, desc: '封面形态 Z 轴浮雕/呼吸强度' },
-  sizeBase: { label: '点尺寸·基数', min: 1, max: 120, step: 0.5, desc: 'Mineradio 原式 36 / 视深' },
+  sizeBase: { label: '点尺寸·基数', min: 1, max: 200, step: 0.5, desc: 'Mineradio 原式 36 / 视深' },
   sizeMax: { label: '点尺寸·上限', min: 0.5, max: 20, step: 0.05, desc: '粒子像素直径上限' },
   brightBase: { label: '亮度·基数', min: 0, max: 3, step: 0.01, desc: 'vBright 常数项' },
   alphaBase: { label: '透明度·基数', min: 0, max: 1, step: 0.01, desc: 'alpha 常数项' },

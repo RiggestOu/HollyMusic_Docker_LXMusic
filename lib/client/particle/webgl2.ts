@@ -575,7 +575,7 @@ const VERTEX_SHADER = /* glsl */ `
       float ringDrive = uBass * 0.30 + uMid * 0.18 + uTreble * 0.22 + uPulse * 0.30;
       sz = clamp(depthSize * (0.90 + ringDrive * 0.62), 1.05, 3.90);
     } else {
-      float audioBoost = 1.0 + ripple * 0.7 + edgeBoost * 0.55 + uPulse * 0.30 + uPresetBurst * 0.5;
+      float audioBoost = 1.0 + ripple * uRippleBright * 0.7 + edgeBoost * 0.55 + uPulse * 0.30 + uPresetBurst * 0.5;
       sz = clamp(depthSize * audioBoost, 1.05, uSizeMax);
     }
     // 星河层用 Mineradio 的另一套夹取范围（其星河是独立着色器，尺寸更大更亮）
@@ -670,7 +670,7 @@ const VERTEX_SHADER = /* glsl */ `
     float bodyAlpha = (uAlphaBase + (1.0 - uAlphaBase) * smoothstep(0.0, 1.0, 0.32 + uEnergy * 0.60))
                     * mix(1.0, 0.94, m);
     vAlpha = isStar ? twinkle * 0.75 : bodyAlpha;
-    // 光晕强度：以默认值 0.62 为 1.0 基准，保证出厂观感不变
+    // 光晕强度：以默认值 1.0 为 1.0 基准，保证出厂观感不变
     // bloom 同时作用于亮度和 alpha，使高值时整体变亮而非仅变透明
     float bloomScale = uBloom / 0.62;
     vGlow *= bloomScale;

@@ -42,8 +42,8 @@ export const DEFAULT_FX: FxSettings = {
   depth: 0.2,
   twist: 0,
   scatter: 0,
-  bloom: 3.0,
-  edge: 1,
+  bloom: 0.87,
+  edge: 0.25,
   bgFade: 0.2,
   // 实验调参默认值（与 lib/client/particle/types.ts 的 DEFAULT_FX 保持一致）
   spectrumAmp: 0.06,
@@ -56,7 +56,7 @@ export const DEFAULT_FX: FxSettings = {
   pulseBass: 0.9,
   burstAmp: 1.6,
   reliefAmp: 1.0,
-  sizeBase: 36.0,
+  sizeBase: 100.0,
   sizeMax: 4.95,
   brightBase: 0.7,
   alphaBase: 0.55,
@@ -74,7 +74,7 @@ const TUNING_RANGE: Record<TuningKey, [number, number]> = {
   pulseBass: [0, 5],
   burstAmp: [0, 10],
   reliefAmp: [0, 3],
-  sizeBase: [1, 120],
+  sizeBase: [1, 200],
   sizeMax: [0.5, 20],
   brightBase: [0, 3],
   alphaBase: [0, 1],
@@ -184,7 +184,7 @@ export const useFxSettingsStore = create<FxSettingsState>()(
         next.depth = Math.max(0, Math.min(2.0, next.depth))
         next.twist = Math.max(0, Math.min(1.0, next.twist))
         next.scatter = Math.max(0, Math.min(1.0, next.scatter))
-        next.bloom = Math.max(0, Math.min(100.0, next.bloom))
+        next.bloom = Math.max(0, Math.min(3.0, next.bloom))
         next.edge = Math.max(0, Math.min(3.0, next.edge))
         next.bgFade = Math.max(0, Math.min(2.0, next.bgFade))
         // 实验调参项：按各自区间钳位

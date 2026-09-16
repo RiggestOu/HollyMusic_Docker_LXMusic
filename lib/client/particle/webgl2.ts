@@ -846,6 +846,7 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
     uFlowBass: { value: DEFAULT_FX.flowBass },
     uFlowMid: { value: DEFAULT_FX.flowMid },
     uRippleAmp: { value: DEFAULT_FX.rippleAmp },
+    uRippleBright: { value: DEFAULT_FX.rippleBright },
     uPulseBase: { value: DEFAULT_FX.pulseBase },
     uPulseBass: { value: DEFAULT_FX.pulseBass },
     uBurstAmp: { value: DEFAULT_FX.burstAmp },
@@ -941,6 +942,7 @@ export function createWebGL2Renderer(options: ParticleRendererOptions): Particle
       uniforms.uFlowBass.value = next.flowBass
       uniforms.uFlowMid.value = next.flowMid
       uniforms.uRippleAmp.value = next.rippleAmp
+      uniforms.uRippleBright.value = next.rippleBright
       uniforms.uPulseBase.value = next.pulseBase
       uniforms.uPulseBass.value = next.pulseBass
       uniforms.uBurstAmp.value = next.burstAmp

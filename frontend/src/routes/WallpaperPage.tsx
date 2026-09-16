@@ -10,7 +10,7 @@
  * 与 Web 端的 `ParticlePanel` 共用同一个 `ParticleScene`，因此视觉与交互完全一致。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ParticleScene } from '@/components/player/ParticleScene'
 import { loadStoredPreset, subscribePresetChange } from '@/lib/client/particle/presets'
 import {
@@ -23,6 +23,7 @@ import {
   type DesktopConfig,
 } from '@/lib/client/desktop-bridge'
 import type { BackendPreference } from '@/lib/client/particle'
+import { useFxSettingsStore, resolveFx } from '@/lib/store/fx-settings-store'
 
 const SPECTRUM_BINS = 64
 
@@ -37,6 +38,10 @@ export function WallpaperPage() {
   const [preset, setPreset] = useState(() => loadStoredPreset())
   // 自定义封面图片（与主窗口共享，上传/恢复后立即跟随）
   const [customImageUrl, setCustomImageUrl] = useState(() => loadStoredCustomImage())
+  // 动效参数：与主窗口调参面板同步（跨窗口共享 localStorage，此处读最新值并 apply 给渲染器）
+  const fx = useFxSettingsStore(s => s.fx)
+  const tuningEnabled = useFxSettingsStore(s => s.tuningEnabled)
+  const fxEffective = useMemo(() => resolveFx(fx, tuningEnabled), [fx, tuningEnabled])
 
   useEffect(() => {
     const stops = [
@@ -74,6 +79,7 @@ export function WallpaperPage() {
         preference={(config?.backend ?? 'auto') as BackendPreference}
         preset={preset}
         coverUrl={customImageUrl}
+        fx={fxEffective}
         onError={setError}
       />
       {error ? (

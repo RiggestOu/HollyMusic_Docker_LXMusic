@@ -11,7 +11,7 @@
  * 本面板只做「界面壳」：参数状态 + 菜单渲染 + 滚轮派发，渲染逻辑全在 ParticleScene。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { X, Sparkles } from 'lucide-react'
 import { ParticleScene } from './ParticleScene'
 import type { BackendKind } from '@/lib/client/particle/types'
@@ -33,6 +33,7 @@ import {
 } from '@/lib/client/particle/custom-image'
 import { buildCoverUrl } from '@/lib/api/music'
 import { usePlayerStore } from '@/lib/store/player-store'
+import { useFxSettingsStore, resolveFx } from '@/lib/store/fx-settings-store'
 
 interface ParticlePanelProps {
   audio: HTMLAudioElement | null
@@ -60,6 +61,9 @@ export function ParticlePanel({ audio }: ParticlePanelProps) {
   const setVolume = usePlayerStore(s => s.setVolume)
   const isPlaying = usePlayerStore(s => s.isPlaying)
   const currentTrack = usePlayerStore(s => s.currentTrack)
+  const fx = useFxSettingsStore(s => s.fx)
+  const tuningEnabled = useFxSettingsStore(s => s.tuningEnabled)
+  const fxEffective = useMemo(() => resolveFx(fx, tuningEnabled), [fx, tuningEnabled])
 
   const [size, setSize] = useState(1)
   const [density, setDensity] = useState(160)
@@ -194,6 +198,8 @@ export function ParticlePanel({ audio }: ParticlePanelProps) {
           grid={density}
           fps={fps}
           pointSize={size}
+          preference={undefined}
+          fx={fxEffective}
           onWheelMenu={handleWheelMenu}
           onBackend={setBackend}
           onError={setError}

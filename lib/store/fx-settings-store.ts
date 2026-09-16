@@ -155,6 +155,8 @@ interface FxSettingsState {
   toggleTuning: (key: TuningKey, on: boolean) => void
   /** 仅重置动效参数（bloom / intensity 等 8 项），不影响调参面板的 14 项。 */
   resetFx: () => void
+  /** 仅重置调参面板的 14 项（bloom / spectrumAmp / flowBase 等），不动动效参数。 */
+  resetTuningOnly: () => void
   /** 重置全部：动效参数 + 调参面板全部项。 */
   resetAll: () => void
   setBackendPreference: (pref: BackendPreference) => void
@@ -226,6 +228,21 @@ export const useFxSettingsStore = create<FxSettingsState>()(
         }
         return { fx: next }
       })
+    },
+    /** 仅重置调参面板的 14 项（spectrumAmp/flowBase/rippleBright 等），不动动效参数。 */
+    resetTuningOnly: () => {
+      const tuningDefaults: Partial<FxSettings> = {}
+      for (const k of TUNING_KEYS) {
+        tuningDefaults[k] = DEFAULT_FX[k] as FxSettings[keyof FxSettings]
+      }
+      persist({ ...DEFAULT_FX })
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('hm-fx-changed'))
+      }
+      set((s) => ({
+        fx: { ...s.fx, ...tuningDefaults },
+        tuningEnabled: defaultTuningEnabled(),
+      }))
     },
     /** 重置全部：动效参数 + 调参面板全部项。 */
     resetAll: () => {

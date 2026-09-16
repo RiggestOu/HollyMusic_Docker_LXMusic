@@ -82,10 +82,14 @@ const TUNING_RANGE: Record<TuningKey, [number, number]> = {
 
 export type TuningEnabled = Record<TuningKey, boolean>
 
-/** 调参开关默认全部打开（即默认值生效）。 */
+/** 调参开关默认值：三个关键参数（涟漪亮度、节拍基数、节拍低频）默认关闭，其余打开。 */
 function defaultTuningEnabled(): TuningEnabled {
   const out = {} as TuningEnabled
   for (const k of TUNING_KEYS) out[k] = true
+  // 这三个参数会让"贴合粒子"歌词模式的平面与相机视角冲突，默认关闭
+  out.rippleBright = false
+  out.pulseBase = false
+  out.pulseBass = false
   return out
 }
 

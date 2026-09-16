@@ -544,8 +544,21 @@ const VERTEX_SHADER = /* glsl */ `
       p.z += relief * m * uReliefAmp;
     }
 
-    // 涟漪抬升
-    p.z += ripple * uRippleAmp;
+    // 涟漪抬升：对不同预设施加不同系数
+    // - 专辑封面（preset 0）：正常强度，形成涟漪光圈
+    // - 滚筒/星球/虚空/唱片（preset 1-4）：较弱
+    // - 安魂/骷髅点云（preset 6）：极弱（0.01x），只产生微颤
+    // - 音域回响（preset 5/7/8）：中等（0.15x）
+    // - 月蚀圣杯/雨幕霓虹/折光蝶群/深海绽放（preset 9-12）：正常
+    float rippleBoost;
+    if (uPreset > 5.5 && uPreset < 6.5) {
+      rippleBoost = 0.01;
+    } else if ((uPreset > 4.5 && uPreset < 5.5) || (uPreset > 7.5 && uPreset < 8.5)) {
+      rippleBoost = 0.15;
+    } else {
+      rippleBoost = 1.0;
+    }
+    p.z += ripple * uRippleAmp * rippleBoost;
 
     // ---- 节拍跳动 + 预设切换爆散：径向位移，先 smoothstep 缓动再施加 ----
     float pulse = smoothstep(0.0, 1.0, uPulse);

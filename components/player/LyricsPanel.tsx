@@ -105,6 +105,8 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
   const [preset, setPreset] = useState(() => loadStoredPreset())
   /** 实际生效的渲染后端（WebGPU / WebGL 2.0），由 ParticleScene 回报 */
   const [backend, setBackend] = useState<string | null>(null)
+  /** 相机旋转补偿：歌词平面反向旋转以跟踪粒子封面 */
+  const [cameraRot, setCameraRot] = useState({ elevationDeg: 0, yawDeg: 0 })
   /** 粒子设置面板（预设 + 动效统一）开合 */
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** 实验调参面板（debug 专用，独立于设置面板） */
@@ -248,10 +250,8 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
       {/* 动画 keyframes（面板挂载期间有效） */}
       <style>{`
         @keyframes hm-lyric-line-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes hm-lyric-sway { from { transform: rotateX(36deg) rotateY(-7deg); } to { transform: rotateX(36deg) rotateY(7deg); } }
-      `}</style>
-
-      {/* 顶部整条 UI 已按需求下线：
+        @keyframes hm-lyric-sway { from { transform: rotateX(5deg) rotateY(-7deg); } to { transform: rotateX(5deg) rotateY(7deg); } }
+      `}</style>      {/* 顶部整条 UI 已按需求下线：
           · 左上角收起箭头 —— 底部的歌曲封面本身就是「点封面返回」，出口未丢；
           · 右上角歌词显示方式 —— 已挪到底部控制条、收藏按钮右侧。
           键盘用户仍可用 Esc 关闭（见上方 keydown 监听）。 */}
@@ -275,6 +275,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           pointSize={0.9}
           className="absolute inset-0"
           onBackend={setBackend}
+          onCameraChange={setCameraRot}
         />
 
         {/* 右上角：仅显示后端状态（WebGPU / WebGL 2.0） */}
@@ -342,7 +343,11 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           <div className="pointer-events-none absolute inset-0 overflow-y-auto px-4 py-16 [perspective:900px]">
             <div
               className="mx-auto max-w-2xl space-y-6"
-              style={{ transformStyle: 'preserve-3d', animation: 'hm-lyric-sway 22s ease-in-out infinite alternate' }}
+              style={{
+                transformStyle: 'preserve-3d',
+                transform: `rotateX(${-cameraRot.elevationDeg}deg) rotateY(${cameraRot.yawDeg}deg)`,
+                animation: 'hm-lyric-sway 22s ease-in-out infinite alternate',
+              }}
             >
               {loading ? (
                 <div className="text-center text-white/50">加载歌词...</div>

@@ -46,7 +46,7 @@ import { loadCoverTexture, type CoverTexture } from '@/lib/client/particle/cover
 import { enhanceCoverDepth } from '@/lib/client/particle/cover-depth-ai'
 import { loadSkullPointCloud, resampleSkull } from '@/lib/client/particle/skull-points'
 import { isMobileLike, suggestedGrid } from '@/lib/utils/device'
-import { subscribePresetChange, loadStoredPreset } from '@/lib/client/particle/presets'
+import { subscribePresetChange, loadStoredPreset, applyCameraState, storeCameraState } from '@/lib/client/particle/presets'
 
 export interface ParticleSceneProps {
   /** 当前播放的原生音频元素；为 null 时粒子仅做静息动画。 */
@@ -77,6 +77,8 @@ export interface ParticleSceneProps {
   onWheelMenu?: (deltaY: number) => void
   /** 后端就绪回调（供 UI 显示当前渲染后端）。 */
   onBackend?: (backend: BackendKind) => void
+  /** 相机旋转变化回调（供歌词面板同步 3D 倾斜），节流在调用侧处理。 */
+  onCameraChange?: (params: { elevationDeg: number; yawDeg: number }) => void
   /** 初始化失败回调（如环境不支持 WebGPU/WebGL2）。 */
   onError?: (message: string) => void
   className?: string
@@ -153,6 +155,7 @@ export function ParticleScene({
   fx = DEFAULT_FX,
   onWheelMenu,
   onBackend,
+  onCameraChange,
   onError,
   className = '',
 }: ParticleSceneProps) {
@@ -224,15 +227,18 @@ export function ParticleScene({
     const count = suggestedGrid(grid) * suggestedGrid(grid)
 
     // ---------- 镜头 rig（Maya 风格球坐标 + 平移目标） ----------
-    // 初始机位取当前预设的基线（对齐 Mineradio 的 applyPresetOrbitBaseline）
-    const initialCamera =
-      PRESET_CAMERA[Math.max(0, Math.min(PRESET_CAMERA.length - 1, Math.round(preset)))]
+    // 初始机位取当前预设的基线（对齐 Mineradio 的 applyPresetOrbitBaseline），
+    // 但优先使用已保存的相机位置（用户上次调整后的位置）。
+    const initialPreset = Math.max(0, Math.min(PRESET_CAMERA.length - 1, Math.round(preset)))
+    const initialCamera = PRESET_CAMERA[initialPreset]
     const rig = {
       radius: initialCamera.radius,
       theta: initialCamera.theta,
       phi: initialCamera.phi,
       target: [0, 0, 0] as [number, number, number],
     }
+    // 尝试恢复已保存的相机位置
+    applyCameraState(initialPreset, rig, initialCamera)
 
     const rotateBy = (dx: number, dy: number) => {
       rig.theta -= dx * 0.0055
@@ -432,6 +438,16 @@ export function ParticleScene({
       mode = 'none'
       const pe = e as PointerEvent
       ;(canvas as HTMLCanvasElement)?.releasePointerCapture?.(pe.pointerId)
+      // 拖拽结束时保存当前预设的相机位置
+      const currentPreset = liveRef.current.preset
+      if (currentPreset !== undefined && currentPreset !== null) {
+        storeCameraState(Math.round(currentPreset), {
+          theta: rig.theta,
+          phi: rig.phi,
+          radius: rig.radius,
+          target: rig.target,
+        })
+      }
     }
     /** 滚轮不控制镜头，转交外层菜单滑块。 */
     const onWheel = (e: Event) => {
@@ -574,12 +590,15 @@ export function ParticleScene({
           if (nextPreset !== PRESET_KEEP_CAMERA) {
               const base =
                 PRESET_CAMERA[Math.max(0, Math.min(PRESET_CAMERA.length - 1, nextPreset))]
+              // 先重置到基线（保持原有行为），再尝试应用已保存的相机位置
               rig.radius = base.radius
               rig.theta = base.theta
               rig.phi = base.phi
               rig.target[0] = 0
               rig.target[1] = 0
               rig.target[2] = 0
+              // 如果该预设有已保存的位置，覆盖基线
+              applyCameraState(Math.round(nextPreset), rig, base)
             }
           }
           // 爆散强度按 dt 指数回落（与帧率解耦，120FPS 与 30FPS 观感一致）
@@ -681,6 +700,12 @@ export function ParticleScene({
             { radius: rig.radius, theta: rig.theta, phi: rig.phi, target: rig.target },
           )
           renderer?.render()
+          // 通知父组件相机旋转变化（歌词面板用于反向补偿）
+          if (onCameraChange) {
+            // elevation = π/2 - φ，yaw = θ（本项目 φ 是自 +Y 轴的极角）
+            const elevation = Math.PI / 2 - rig.phi
+            onCameraChange({ elevationDeg: elevation * 180 / Math.PI, yawDeg: rig.theta * 180 / Math.PI })
+          }
         }
         raf = requestAnimationFrame(loop)
 

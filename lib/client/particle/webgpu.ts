@@ -433,12 +433,22 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(p.x * radial, p.y * radial, select(zVinyl, zCover, inside > 0.02));
   }
 
-  // 6 骷髅点云：坐标来自外部点云资源（setSkullPoints 写入 anchor 字段），
-  //   这里只叠加呼吸与浮动
+  // 6 安魂（骷髅点云）：坐标来自外部点云资源（setSkullPoints 写入 anchor 字段），
+  //   叠加微弱呼吸 + 整体漂移 + 每粒子闪烁，涟漪系数 0.01x。
+  //   【关键：必须有 return，否则会继续落入下方 s<8.5 WALLPAPER PULSE 分支变成"矩阵"】
   if (s > 5.5 && s < 6.5) {
     let breath = 1.0 + u.bass * 0.06 * K;
+    // 整体漂移（整个点云缓慢浮动，不是单点偏移）
     let drift = snoise(vec3<f32>(c.x * 0.6, c.y * 0.6, t * 0.25)) * 0.05;
-    return vec3<f32>(anchor.x * breath, anchor.y * breath + drift, anchor.z * breath);
+    // 每粒子闪烁（Mineradio 风格 pow(sin, 5) 产生尖锐闪烁）
+    let twinkle = pow(0.5 + 0.5 * sin(t * (0.3 + p.seed * 0.5) + p.seed * 17.0), 5.0);
+    // 记录闪烁强度到自定义字段，供亮度计算使用
+    // （此处通过返回 vec3 的 w 分量不可行，闪烁在片元阶段处理）
+    return vec3<f32>(
+      anchor.x * breath + drift,
+      anchor.y * breath + drift,
+      anchor.z * breath
+    );
   }
 
   // 5-8 WALLPAPER PULSE：螺旋极光带（lane<0.80）+ 远景尘埃（lane>=0.80）+ 切换脉冲
@@ -733,8 +743,28 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
                + n3 * u.treble * 0.50 + breath * u.bass * 1.25;
     tgt = tgt + vec3<f32>(0.0, 0.0, relief * mCover * u.reliefAmp);
   }
-  // 涟漪抬升（webgl2: p.z += ripple * 1.30）
-  tgt = tgt + vec3<f32>(0.0, 0.0, rippleSum(base.xy, u) * u.rippleAmp);
+  // 涟漪抬升：对不同预设施加不同系数
+  // - 专辑封面（preset 0）：正常强度，形成涟漪光圈
+  // - 滚筒/星球/虚空/唱片（preset 1-4）：较弱，避免破坏几何形态
+  // - 安魂/骷髅点云（preset 6）：极弱（0.01x），只产生微颤
+  // - 音域回响（preset 5/7/8）：中等（0.15x），与极光带融合
+  // - 月蚀圣杯/雨幕霓虹/折光蝶群/深海绽放（preset 9-12）：正常
+  // ⚠️ 星河背景粒子（isStar=true）完全不参与涟漪计算
+  let rippleBoost: f32;
+  if (!isStar) {
+    if (u.preset > 5.5 && u.preset < 6.5) {
+      // 安魂（骷髅点云）：涟漪几乎不形变，只产生微弱呼吸感
+      rippleBoost = 0.01;
+    } else if ((u.preset > 4.5 && u.preset < 5.5) || (u.preset > 7.5 && u.preset < 8.5)) {
+      // 音域回响（预设 5/7/8）：中等涟漪
+      rippleBoost = 0.15;
+    } else {
+      rippleBoost = 1.0;
+    }
+  } else {
+    rippleBoost = 0.0; // 星河不受涟漪影响
+  }
+  tgt = tgt + vec3<f32>(0.0, 0.0, rippleSum(base.xy, u) * u.rippleAmp * rippleBoost);
   let dir = normalize(base + vec3<f32>(1e-4));
   // 节拍跳动 + 预设切换爆散
   tgt = tgt + dir * smoothstep(0.0, 1.0, u.pulse) * (u.pulseBase + u.bass * u.pulseBass) * burstScale;

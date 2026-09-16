@@ -242,17 +242,22 @@ const VERTEX_SHADER = /* glsl */ `
       return vec3(c.x * 0.01, c.y * 0.01, -90.0);
     }
 
-    // 4 VINYL RECORD：中心封面 + 黑胶沟槽 + 完整白边（移除了盘面 spin）
+    // 4 VINYL RECORD：中心封面 + 黑胶沟槽 + 完整白边 + 盘面自转（对齐 Mineradio uVinylSpin）
     if (s < 4.5) {
+      float spin = uTime * uSpeed * 0.15;
+      float cs = cos(spin);
+      float sn = sin(spin);
       vec2 p = (uv - vec2(0.5)) * 5.12;
-      float d = length(p);
+      // 应用旋转变换
+      vec2 rp = vec2(cs * p.x - sn * p.y, sn * p.x + cs * p.y);
+      float d = length(rp);
       float recordR = 2.46;
       float coverR = 1.18;
       float bassDrive = smoothstep(0.08, 0.78, uBass + uPulse * 0.82);
       float highDrive = smoothstep(0.05, 0.46, uTreble);
       float border = exp(-pow((d - coverR) / 0.064, 2.0));
       float vinylN = clamp((d - coverR) / max(0.001, recordR - coverR), 0.0, 1.0);
-      float angle0 = atan(p.y, p.x);
+      float angle0 = atan(rp.y, rp.x);
       float groove = 0.5 + 0.5 * sin((d - coverR) * 98.0);
       float tickHash = hash11(floor((angle0 + PI) * 38.0) + floor(d * 72.0) * 2.1);
       float tick = smoothstep(0.82, 0.995, tickHash);
@@ -262,15 +267,24 @@ const VERTEX_SHADER = /* glsl */ `
                    + bassDrive * vinylN * 0.016 * K + tick * highDrive * 0.010;
       float inside = 1.0 - smoothstep(coverR - 0.012, coverR + 0.018, d);
       float radial = 1.0 + bassDrive * 0.012 + uPulse * 0.026;
-      return vec3(p.x * radial, p.y * radial, inside > 0.02 ? zCover : zVinyl);
+      return vec3(rp.x * radial, rp.y * radial, inside > 0.02 ? zCover : zVinyl);
     }
 
-    // 6 骷髅点云：坐标来自外部点云资源（由 setSkullPoints 写入 anchor 槽位），
-    //   这里只叠加轻微的呼吸与浮动（对应其浮空层的表现）
+    // 6 安魂（骷髅点云）：坐标来自外部点云资源（setSkullPoints 写入 anchor 槽位），
+    //   对齐 Mineradio 的 float-skull-backcover.js：整体旋转 + 微弱漂移，无拉伸缩放
+    //   【关键：必须有 return，否则会继续落入下方 s<8.5 WALLPAPER PULSE 分支变成"矩阵"】
     if (s > 5.5 && s < 6.5) {
-      float breath = 1.0 + uBass * 0.06 * K;
-      float drift = snoise(vec3(c.x * 0.6, c.y * 0.6, t * 0.25)) * 0.05;
-      return vec3(anchor.x * breath, anchor.y * breath + drift, anchor.z * breath);
+      // 整体旋转（对齐 Mineradio 的 orbit 逻辑）
+      float orbit = t * 0.03;
+      float cs = cos(orbit);
+      float sn = sin(orbit);
+      float rx = cs * anchor.x - sn * anchor.y;
+      float ry = sn * anchor.x + cs * anchor.y;
+      // 微弱漂移（对齐 Mineradio 的 aAmp * 0.34 等）
+      float driftX = sin(t * 0.18 + seed * 6.28) * 0.04;
+      float driftY = cos(t * 0.15 + seed * 6.28) * 0.035;
+      float driftZ = sin(t * 0.11 + seed * 6.28) * 0.06;
+      return vec3(rx + driftX, ry + driftY, anchor.z + driftZ);
     }
 
     // 5-8 WALLPAPER PULSE：螺旋极光带（lane<0.80）+ 远景尘埃（lane>=0.80）+ 切换脉冲
@@ -544,21 +558,11 @@ const VERTEX_SHADER = /* glsl */ `
       p.z += relief * m * uReliefAmp;
     }
 
-    // 涟漪抬升：对不同预设施加不同系数
-    // - 专辑封面（preset 0）：正常强度，形成涟漪光圈
-    // - 滚筒/星球/虚空/唱片（preset 1-4）：较弱
-    // - 安魂/骷髅点云（preset 6）：极弱（0.01x），只产生微颤
-    // - 音域回响（preset 5/7/8）：中等（0.15x）
-    // - 月蚀圣杯/雨幕霓虹/折光蝶群/深海绽放（preset 9-12）：正常
-    float rippleBoost;
-    if (uPreset > 5.5 && uPreset < 6.5) {
-      rippleBoost = 0.01;
-    } else if ((uPreset > 4.5 && uPreset < 5.5) || (uPreset > 7.5 && uPreset < 8.5)) {
-      rippleBoost = 0.15;
-    } else {
-      rippleBoost = 1.0;
+    // 涟漪抬升：对齐 Mineradio，涟漪只对专辑封面（preset 0）生效
+    // 其他预设（滚筒/星球/虚空/唱片/音域回响等）不受涟漪影响
+    if (!isStar && uPreset < 0.5) {
+      p.z += ripple * uRippleAmp;
     }
-    p.z += ripple * uRippleAmp * rippleBoost;
 
     // ---- 节拍跳动 + 预设切换爆散：径向位移，先 smoothstep 缓动再施加 ----
     float pulse = smoothstep(0.0, 1.0, uPulse);
@@ -683,6 +687,16 @@ const VERTEX_SHADER = /* glsl */ `
     float bodyAlpha = (uAlphaBase + (1.0 - uAlphaBase) * smoothstep(0.0, 1.0, 0.32 + uEnergy * 0.60))
                     * mix(1.0, 0.94, m);
     vAlpha = isStar ? twinkle * 0.75 : bodyAlpha;
+    // 星河透明度按预设差异化（对齐 Mineradio）：
+    // - 预设 7（音域回响 Sonic-Topography）：星河完全不显示
+    // - 预设 8（音域回响 Wallpaper Engine）：星河半透明（~0.28）
+    if (isStar) {
+      if (uPreset > 6.5 && uPreset < 7.5) {
+        vAlpha = 0.0; // preset 7: 隐藏星河
+      } else if (uPreset > 7.5 && uPreset < 8.5) {
+        vAlpha = 0.28; // preset 8: 半透明星河
+      }
+    }
     // 光晕强度：以默认值 1.0 为 1.0 基准，保证出厂观感不变
     // bloom 同时作用于亮度和 alpha，使高值时整体变亮而非仅变透明
     float bloomScale = uBloom / 0.62;

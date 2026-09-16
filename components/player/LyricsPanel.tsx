@@ -345,8 +345,10 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
               className="mx-auto max-w-2xl space-y-6"
               style={{
                 transformStyle: 'preserve-3d',
-                transform: `rotateX(${-cameraRot.elevationDeg}deg) rotateY(${cameraRot.yawDeg}deg)`,
-                animation: 'hm-lyric-sway 22s ease-in-out infinite alternate',
+                // 反向旋转相机角度，使歌词平面与粒子封面平行
+                // 注意：不使用 hm-lyric-sway 动画，否则 CSS 动画会覆盖 inline transform，
+                // 导致歌词无法与专辑封面保持平行
+                transform: `rotateX(${-cameraRot.elevationDeg}deg) rotateY(${-cameraRot.yawDeg}deg)`,
               }}
             >
               {loading ? (

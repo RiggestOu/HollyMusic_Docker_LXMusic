@@ -1,4 +1,3 @@
-
 import { usePlayerStore } from '@/lib/store/player-store'
 import { useFavoritesStore } from '@/lib/store/favorites-store'
 import { useContextMenuStore } from '@/lib/store/context-menu-store'
@@ -9,7 +8,7 @@ import { useDownloadStatus } from '@@/hooks/useDownloadStatus'
 import { CoverImage } from './CoverImage'
 import { SourceBadge } from './SourceBadge'
 import { QualityBadge } from './QualityBadge'
-import { Play, Pause, Heart, MoreHorizontal, Download, Loader2, CheckCircle, Circle } from 'lucide-react'
+import { Play, Pause, Heart, MoreHorizontal, Download, Loader2, CheckCircle } from 'lucide-react'
 import { formatTime } from '@/lib/utils/format'
 import { resolveQuality } from '@/lib/quality-options'
 import type { Track } from '@/lib/types/player'
@@ -33,6 +32,7 @@ export function SongRow({ track, queue, index, playlistId }: SongRowProps) {
   const { download, downloading, error } = useDownload()
   // 查询下载状态
   const { isDownloaded } = useDownloadStatus([track.uid])
+  const downloaded = isDownloaded(track.uid)
 
   const isCurrent = currentTrack?.uid === track.uid
   const isCurrentPlaying = isCurrent && isPlaying
@@ -122,13 +122,17 @@ export function SongRow({ track, queue, index, playlistId }: SongRowProps) {
           className={`hidden shrink-0 p-1 transition md:block ${
             downloading
               ? 'text-primary opacity-100'
-              : 'text-muted-foreground opacity-70 hover:text-foreground focus-visible:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100'
+              : downloaded
+                ? 'text-green-500 opacity-100 cursor-default'
+                : 'text-muted-foreground opacity-70 hover:text-foreground focus-visible:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100'
           } disabled:opacity-100`}
-          aria-label="下载"
-          title={downloading ? '下载中…' : (error ?? '下载')}
+          aria-label={downloaded ? '已下载' : '下载'}
+          title={downloaded ? '已下载到本地' : (error ?? '下载')}
         >
           {downloading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
+          ) : downloaded ? (
+            <CheckCircle className="h-4 w-4" />
           ) : (
             <Download className="h-4 w-4" />
           )}

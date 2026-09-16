@@ -17,6 +17,7 @@ import {
 import type { BackendPreference } from '@/lib/client/particle'
 import { useFxSettingsStore, type FxSettings, DEFAULT_FX } from '@/lib/store/fx-settings-store'
 import { SlidersHorizontal, Sparkles, RotateCcw, X, Cpu, AlignJustify, Layers, Type } from 'lucide-react'
+import { LensPresetsPanel } from './LensPresetsPanel'
 
 type Tab = 'preset' | 'fx' | 'lyrics'
 
@@ -262,6 +263,13 @@ export function ParticleSettingsPanel({ open, onClose }: { open: boolean; onClos
             </div>
           )}
         </div>
+
+        {/* 镜头预设管理面板 */}
+        <LensPresetsPanel
+          visualPreset={PRESETS[preset]?.key ?? 'silk'}
+          lyricsMode={lyricsMode}
+          cameraState={{ theta: 0, phi: Math.PI / 2, radius: 6.6, target: [0, 0, 0] }}
+        />
 
         {/* 底栏：重置 */}
         <div className="shrink-0 border-t border-border px-4 py-3">

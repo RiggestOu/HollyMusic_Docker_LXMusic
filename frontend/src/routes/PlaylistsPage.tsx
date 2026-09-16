@@ -10,9 +10,10 @@ import {
   Music4,
   Trash2,
   CheckCheck,
+  Merge,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, type PlaylistSummary } from '@/lib/api/playlists'
+import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, type PlaylistSummary, type ImportPlaylistSong } from '@/lib/api/playlists'
 import { useAuthStore } from '@/hooks/useAuth'
 import { usePlaylists } from '@/hooks/usePlaylists'
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton'
@@ -20,6 +21,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { CreatePlaylistDialog } from '@@/components/playlists/CreatePlaylistDialog'
 import { DeletePlaylistDialog } from '@@/components/playlists/DeletePlaylistDialog'
 import { EditPlaylistDialog } from '@@/components/playlists/EditPlaylistDialog'
+import { MergePlaylistDialog } from '@@/components/playlists/MergePlaylistDialog'
 import { PlaylistGrid } from '@@/components/playlists/PlaylistGrid'
 import { useDownloadQueue } from '@/hooks/useDownloadQueue'
 import { toast } from '@/lib/toast'
@@ -175,6 +177,8 @@ export function PlaylistsPage() {
   // 批量选中状态
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [batchDeleting, setBatchDeleting] = useState(false)
+  const [showMerge, setShowMerge] = useState(false)
+  const [merging, setMerging] = useState(false)
 
   const handleExport = async () => {
     try {
@@ -322,11 +326,114 @@ export function PlaylistsPage() {
     setSelectedIds(new Set(ids))
   }, [])
 
+  /**
+   * 合并选中的歌单：
+   * 1. 逐个读取歌单歌曲（songId + musicInfo），按 songId 去重
+   * 2. 调用后端批量导入接口一次性创建新歌单
+   * 3. 创建成功后删除所有原歌单
+   */
+  const handleMerge = async (name: string) => {
+    if (selectedIds.size < 2) return
+    setMerging(true)
+    console.info(`[合并] 开始：${selectedIds.size} 个歌单合并为「${name}」`)
+    try {
+      const ids = Array.from(selectedIds)
+      const merged: ImportPlaylistSong[] = []
+      const seen = new Set<string>()
+      for (const p of playlists.filter(pl => ids.includes(pl.id))) {
+        try {
+          const detail = await getPlaylist(p.id)
+          let count = 0
+          for (const e of detail.entries || []) {
+            if (!e.songId || seen.has(e.songId)) continue
+            seen.add(e.songId)
+            merged.push({ songId: e.songId, musicInfo: e.musicInfo as ImportPlaylistSong['musicInfo'] })
+            count++
+          }
+          console.info(`[合并] 歌单「${p.name}」读取完成，新增歌曲=${count}`)
+        } catch (err) {
+          console.error(`[合并] 歌单「${p.name}」读取失败:`, err)
+          throw new Error(`读取歌单「${p.name}」失败`)
+        }
+      }
+
+      const { importPlaylists } = await import('@/lib/api/playlists')
+      const result = await importPlaylists([{ name, comment: null, isPublic: false, songs: merged }])
+      if (result.failed.length > 0) {
+        console.error('[合并] 新歌单创建失败:', result.failed)
+        throw new Error(result.failed[0]?.error || '创建新歌单失败')
+      }
+      console.info(`[合并] 新歌单「${name}」创建成功（id=${result.created[0]?.id}），歌曲数=${merged.length}，开始删除原歌单`)
+
+      // 合并成功后删除原歌单
+      let deleted = 0
+      const deleteErrors: string[] = []
+      for (const id of ids) {
+        const src = playlists.find(pl => pl.id === id)
+        try {
+          await deletePlaylist(id)
+          deleted++
+          console.info(`[合并] 原歌单「${src?.name ?? id}」已删除`)
+        } catch (err) {
+          console.error(`[合并] 原歌单「${src?.name ?? id}」删除失败:`, err)
+          deleteErrors.push(src?.name ?? String(id))
+        }
+      }
+
+      setSelectedIds(new Set())
+      setShowMerge(false)
+      await reload()
+      console.info(`[合并] 完成：新歌单 1 个，删除原歌单 ${deleted}/${ids.length}`)
+      if (deleteErrors.length > 0) {
+        toast.error(`合并成功，但原歌单删除失败：${deleteErrors.join('、')}`)
+      } else {
+        toast.success(`已合并为「${name}」（${merged.length} 首），原 ${ids.length} 个歌单已删除`)
+      }
+    } catch (error) {
+      console.error('[合并] 合并失败:', error)
+      throw error instanceof Error ? error : new Error('合并失败')
+    } finally {
+      setMerging(false)
+    }
+  }
+
   return (
     <div className="p-6">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="hidden text-2xl font-bold md:block">我的歌单</h1>
         <div className="flex flex-wrap items-center gap-2">
+          {/* 批量删除按钮 */}
+          {selectedIds.size > 0 && (
+            <button
+              onClick={handleBatchDelete}
+              disabled={batchDeleting}
+              className="flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-2 text-sm font-medium text-destructive transition hover:bg-destructive/25 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              {batchDeleting
+                ? `删除中 ${selectedIds.size}/${playlists.length}`
+                : `删除 (${selectedIds.size})`}
+            </button>
+          )}
+          {/* 合并歌单（需选中 ≥2 个） */}
+          {selectedIds.size >= 2 && (
+            <button
+              onClick={() => setShowMerge(true)}
+              disabled={merging}
+              className="flex items-center gap-1 rounded-full bg-primary/15 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/25 disabled:opacity-50"
+            >
+              <Merge className="h-4 w-4" />
+              {merging ? '合并中…' : `合并 (${selectedIds.size})`}
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted"
+            >
+              <CheckCheck className="h-4 w-4" /> 取消选择
+            </button>
+          )}
           {/* 第 14 项：下载全部未下载歌曲（默认最高质量，已存在的跳过） */}
           <button
             onClick={handleDownloadMissing}
@@ -382,6 +489,10 @@ export function PlaylistsPage() {
           onEdit={setEditingPlaylist}
           onDelete={setDeletingPlaylist}
           onDownload={handleDownloadPlaylist}
+          multiSelect
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onSelectAll={handleSetSelected}
         />
       ) : (
         <EmptyState icon={ListMusic} title="还没有歌单" description="新建一个歌单开始整理" />
@@ -449,6 +560,14 @@ export function PlaylistsPage() {
           playlistName={deletingPlaylist.name}
           onClose={() => setDeletingPlaylist(null)}
           onConfirm={handleDelete}
+        />
+      )}
+
+      {showMerge && (
+        <MergePlaylistDialog
+          count={selectedIds.size}
+          onClose={() => setShowMerge(false)}
+          onMerge={handleMerge}
         />
       )}
     </div>

@@ -145,27 +145,24 @@ export function PlaylistGrid({
         )
 
         if (overlap) {
-          if (e.ctrlKey || e.metaKey) {
-            // Ctrl+框选：切换选中状态
-            if (selectedIds.has(playlist.id)) {
-              selectedIds.delete(playlist.id)
-            } else {
-              selectedIds.add(playlist.id)
-            }
-            selected.push(playlist.id)
-          } else {
-            // 普通框选：添加到选中列表
-            selected.push(playlist.id)
-          }
+          selected.push(playlist.id)
         }
       })
 
-      if (!e.ctrlKey && !e.metaKey) {
-        // 非 Ctrl 模式，使用选中的列表
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+框选：在已有选中基础上对框内歌单逐一切换（不可变更新，一次性提交）
+        const next = new Set(selectedIds)
+        for (const id of selected) {
+          if (next.has(id)) {
+            next.delete(id)
+          } else {
+            next.add(id)
+          }
+        }
+        onSelectAll?.([...next])
+      } else {
+        // 普通框选：选中列表替换为框内歌单
         onSelectAll?.(selected)
-      } else if (selected.length > 0 && onToggleSelect) {
-        // Ctrl 模式，逐一切换
-        selected.forEach(id => onToggleSelect(id))
       }
     }
 
@@ -210,8 +207,13 @@ export function PlaylistGrid({
             }}
           >
             <Link to={`/playlists/${playlist.id}`} className="flex flex-col gap-2" onClick={e => {
-              // 阻止框选事件冒泡到卡片链接
-              if (multiSelect) e.stopPropagation()
+              if (!multiSelect) return
+              // Ctrl/Cmd+点击：切换选中且不跳转详情页
+              if (e.ctrlKey || e.metaKey) {
+                e.preventDefault()
+                e.stopPropagation()
+                onToggleSelect?.(playlist.id)
+              }
             }}>
               <PlaylistCover
                 coverArt={playlist.coverArt}

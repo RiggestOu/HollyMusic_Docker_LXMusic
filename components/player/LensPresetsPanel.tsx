@@ -32,28 +32,41 @@ export function LensPresetsPanel({
 
   // 加载预设列表
   useEffect(() => {
+    console.info('[LensPresets] 开始加载预设')
     loadPresets().then(data => {
+      console.info('[LensPresets] 加载成功，预设数量:', Object.keys(data.presets).length)
       setPresets(data.presets)
       setIsLoaded(true)
-    }).catch(console.error)
+    }).catch(err => {
+      console.error('[LensPresets] 加载失败:', err)
+    })
   }, [loadPresets])
 
   /** 另存预设 */
   const handleSave = async () => {
     try {
+      // 弹出输入框让用户输入名称
+      const name = prompt('请输入预设名称:', `${visualPreset}_${lyricsMode}`)
+      if (!name || !name.trim()) {
+        console.info('[LensPresets] 用户取消或输入空名称')
+        return
+      }
+
       const preset: LensPreset = {
         visual: visualPreset,
         lyrics_mode: lyricsMode,
         camera: cameraState,
-        name: `${visualPreset}_${lyricsMode}`,
-        description: `镜头预设: ${visualPreset} + ${lyricsMode}`,
+        name: name.trim(),
+        description: `镜头预设: ${name.trim()}`,
       }
+      console.info('[LensPresets] 保存预设:', currentKey, '名称:', name.trim())
       await savePreset(currentKey, preset)
       // 刷新列表
       const updated = await loadPresets()
       setPresets(updated.presets)
       alert('✅ 预设已保存')
     } catch (err) {
+      console.error('[LensPresets] 保存失败:', err)
       alert('❌ 保存失败: ' + err)
     }
   }

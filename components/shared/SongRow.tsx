@@ -5,10 +5,11 @@ import { useContextMenuStore } from '@/lib/store/context-menu-store'
 import { useAuthStore } from '@/hooks/useAuth'
 import { useDownload } from '@/hooks/useDownload'
 import { useLongPress } from '@/hooks/useLongPress'
+import { useDownloadStatus } from '@@/hooks/useDownloadStatus'
 import { CoverImage } from './CoverImage'
 import { SourceBadge } from './SourceBadge'
 import { QualityBadge } from './QualityBadge'
-import { Play, Pause, Heart, MoreHorizontal, Download, Loader2 } from 'lucide-react'
+import { Play, Pause, Heart, MoreHorizontal, Download, Loader2, CheckCircle, Circle } from 'lucide-react'
 import { formatTime } from '@/lib/utils/format'
 import { resolveQuality } from '@/lib/quality-options'
 import type { Track } from '@/lib/types/player'
@@ -30,6 +31,8 @@ export function SongRow({ track, queue, index, playlistId }: SongRowProps) {
   const openMenu = useContextMenuStore(s => s.openMenu)
   const authenticated = useAuthStore(s => s.authenticated)
   const { download, downloading, error } = useDownload()
+  // 查询下载状态
+  const { isDownloaded } = useDownloadStatus([track.uid])
 
   const isCurrent = currentTrack?.uid === track.uid
   const isCurrentPlaying = isCurrent && isPlaying

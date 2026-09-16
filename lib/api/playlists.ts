@@ -62,6 +62,46 @@ export function addSongsToPlaylist(
   return apiPost(`playlists/${id}/songs`, { songIds })
 }
 
+/**
+ * 导入歌单（含 musicInfo）
+ */
+export interface ImportPlaylistSong {
+  songId: string
+  musicInfo: MusicInfo
+}
+
+export interface ImportPlaylist {
+  name: string
+  comment?: string | null
+  isPublic?: boolean
+  songs: ImportPlaylistSong[]
+}
+
+export interface ImportResult {
+  created: Array<{ id: number; name: string; count: number }>
+  failed: Array<{ name: string; error: string }>
+  totalCreated: number
+}
+
+export function importPlaylists(playlists: ImportPlaylist[]): Promise<ImportResult> {
+  return apiPost('playlists/import', { playlists })
+}
+
+/**
+ * 从文件导入歌单（读取 JSON 后调用 API）
+ */
+export async function importPlaylistsFromFile(file: File): Promise<{ success: number; failed: number }> {
+  const text = await file.text()
+  const data = JSON.parse(text) as { playlists: ImportPlaylist[] }
+  if (!data || !Array.isArray(data.playlists)) throw new Error('文件格式不正确')
+  
+  const result = await importPlaylists(data.playlists)
+  return {
+    success: result.totalCreated,
+    failed: result.failed.length
+  }
+}
+
 export function removeSongsFromPlaylist(
   id: number,
   positions: number[]

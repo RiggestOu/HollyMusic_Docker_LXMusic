@@ -12,6 +12,7 @@ import { audioServe } from '@/lib/audio-serve'
 import { parseIntervalToSeconds } from '@/lib/types/player'
 import { sanitizeFilename, buildFilenameFromMusicInfo } from '@/lib/server/download-utils'
 import type { QualityType } from '@/lib/types/music'
+import { markDownloaded } from '@/lib/download-status'
 
 /**
  * 下载到 NAS（服务端落盘）
@@ -114,6 +115,8 @@ export async function POST(request: NextRequest) {
       await rename(tmpPath, targetPath)
 
       logger.info(`[download-to-nas] ok uid=${uid} file=${filename} size=${info.size}`)
+      // 记录下载状态
+      markDownloaded(uid, filename, quality)
       return NextResponse.json({
         ok: true,
         filename,

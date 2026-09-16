@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ChangeEvent } from 'react'
+import { useState, useRef, useEffect, useCallback, type ChangeEvent } from 'react'
 import {
   ListMusic,
   Plus,
@@ -8,9 +8,11 @@ import {
   CloudDownload,
   HardDrive,
   Music4,
+  Trash2,
+  CheckCheck,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { getPlaylist, addSongsToPlaylist, updatePlaylist, type PlaylistSummary } from '@/lib/api/playlists'
+import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, type PlaylistSummary } from '@/lib/api/playlists'
 import { useAuthStore } from '@/hooks/useAuth'
 import { usePlaylists } from '@/hooks/usePlaylists'
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton'
@@ -170,6 +172,10 @@ export function PlaylistsPage() {
   const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // 批量选中状态
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [batchDeleting, setBatchDeleting] = useState(false)
+
   const handleExport = async () => {
     try {
       const data: PlaylistExportFile = {
@@ -206,15 +212,35 @@ export function PlaylistsPage() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    console.info(`[导入] 开始处理文件「${file.name}」，大小=${file.size} 字节`)
     try {
       const text = await file.text()
       const data = JSON.parse(text) as PlaylistExportFile
       if (!data || !Array.isArray(data.playlists)) throw new Error('文件格式不正确')
+      console.info(`[导入] 解析成功：version=${data.version ?? 1}，歌单数=${data.playlists.length}，歌曲总数=${data.playlists.reduce((n, p) => n + ((p.songs || []) as unknown[]).length, 0)}`)
+
+      // Version 2 format: pass musicInfo to backend
+      if (data.version === 2) {
+        const { importPlaylists } = await import('@/lib/api/playlists')
+        console.info('[导入] v2 格式：调用后端批量导入接口...')
+        const result = await importPlaylists(data.playlists as any)
+        console.info(`[导入] 后端返回：成功 ${result.totalCreated} 个歌单，失败 ${result.failed.length} 个` +
+          (result.failed.length > 0 ? `，失败明细: ${JSON.stringify(result.failed)}` : ''))
+        await reload()
+        alert(`导入完成：成功 ${result.totalCreated} 个歌单，失败 ${result.failed.length} 个`)
+        return
+      }
+
+      // Legacy format (version 1): only songIds, no musicInfo
+      console.info('[导入] v1 旧格式（仅 songId）：逐个歌单前端导入...')
       let created = 0
       let failed = 0
+      let idx = 0
       for (const item of data.playlists) {
+        idx++
+        const name = (item.name || '').trim() || '导入的歌单'
         try {
-          const name = (item.name || '').trim() || '导入的歌单'
+          console.info(`[导入] (${idx}/${data.playlists.length}) 歌单「${name}」开始处理`)
           const p = await create(name)
           const updates: { comment?: string; public?: boolean } = {}
           if (item.comment !== undefined) updates.comment = item.comment ?? undefined
@@ -223,13 +249,17 @@ export function PlaylistsPage() {
           const songIds = (item.songs || []).map(s => s.songId).filter(Boolean)
           if (songIds.length > 0) await addSongsToPlaylist(p.id, songIds)
           created++
-        } catch {
+          console.info(`[导入] (${idx}/${data.playlists.length}) 歌单「${name}」导入成功，歌曲数=${songIds.length}`)
+        } catch (err) {
           failed++
+          console.error(`[导入] (${idx}/${data.playlists.length}) 歌单「${name}」导入失败:`, err)
         }
       }
+      console.info(`[导入] 全部结束：成功 ${created} 个，失败 ${failed} 个`)
       await reload()
       alert(`导入完成：成功 ${created} 个，失败 ${failed} 个`)
     } catch (error) {
+      console.error('[导入] 文件处理失败:', error)
       alert(error instanceof Error ? error.message : '导入失败')
     }
   }
@@ -253,6 +283,44 @@ export function PlaylistsPage() {
       alert(error instanceof Error ? error.message : '删除失败')
     }
   }
+
+  // 批量删除选中的歌单
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return
+    try {
+      setBatchDeleting(true)
+      const ids = Array.from(selectedIds)
+      // 并行删除
+      await Promise.all(ids.map(id => deletePlaylist(id)))
+      // 从列表中移除
+      setSelectedIds(new Set())
+      // 刷新列表
+      await reload()
+      toast.success(`已删除 ${ids.length} 个歌单`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除失败')
+    } finally {
+      setBatchDeleting(false)
+    }
+  }
+
+  // 切换单个歌单的选中状态
+  const handleToggleSelect = useCallback((id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
+
+  // 设置选中列表（用于框选和点击空白清空）
+  const handleSetSelected = useCallback((ids: number[]) => {
+    setSelectedIds(new Set(ids))
+  }, [])
 
   return (
     <div className="p-6">

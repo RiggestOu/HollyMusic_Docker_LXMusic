@@ -31,6 +31,7 @@ import { PlaylistsPage } from './routes/PlaylistsPage'
 import { PlaylistDetailPage } from './routes/PlaylistDetailPage'
 import { AiPlaylistPage } from './routes/AiPlaylistPage'
 import { HistoryPage } from './routes/HistoryPage'
+import { LocalMusicPage } from './routes/LocalMusicPage'
 import { LoginPage } from './routes/LoginPage'
 import { ChangePasswordPage } from './routes/ChangePasswordPage'
 import { AdminPage, AdminUsersPage, AdminSourcesPage, AdminRecommendPage } from './routes/AdminPage'
@@ -185,6 +186,7 @@ export function App() {
             <Route path="/playlists/ai-create" element={<AiPlaylistPage />} />
             <Route path="/playlists/:id/ai-add" element={<AiPlaylistPage />} />
             <Route path="/playlists/:id" element={<PlaylistDetailPage />} />
+            <Route path="/local" element={<LocalMusicPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />

@@ -22,6 +22,7 @@ import { AudioSpectrum } from './AudioSpectrum'
 import { ParticleScene } from './ParticleScene'
 import { ParticleSettingsPanel, LYRICS_MODE_CHANGED_EVENT } from './FxSettingsPanel'
 import { ParticleTuningPanel } from './ParticleTuningPanel'
+import { LensPresetsPanel } from './LensPresetsPanel'
 import type { LucideIcon } from 'lucide-react'
 import {
   Play,
@@ -168,6 +169,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
   const { lines, activeIndex, hasLyric, loading } = useLyrics(track?.uid, currentTime)
 
   const activeRef = useRef<HTMLDivElement>(null)
+  const planeScrollRef = useRef<HTMLDivElement>(null)
   const buffering = bufferProgress !== null
 
   // 歌词显示模式（持久化：下次打开保持上次选择）
@@ -685,6 +687,18 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
       <ParticleSettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {/* 实验调参抽屉（debug，仅由「调参」按钮打开） */}
       <ParticleTuningPanel open={tuningOpen} onClose={() => setTuningOpen(false)} />
+      
+      {/* 镜头预设管理面板 */}
+      <LensPresetsPanel
+        visualPreset={PRESETS[preset]?.key ?? 'silk'}
+        lyricsMode={mode}
+        cameraState={{
+          theta: cameraRot.yawDeg * Math.PI / 180,
+          phi: (Math.PI / 2 - cameraRot.elevationDeg * Math.PI / 180),
+          radius: 6.6,
+          target: [0, 0, 0],
+        }}
+      />
     </div>
   )
 }

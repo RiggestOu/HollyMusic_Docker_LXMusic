@@ -111,6 +111,7 @@ export function resolveFx(fx: FxSettings, enabled: TuningEnabled): FxSettings {
 
 const STORAGE_KEY = 'hm-fx-settings'
 const PREFERENCE_KEY = 'hm-backend-preference'
+const TUNING_ENABLED_KEY = 'hm-tuning-enabled'
 
 function loadStored(): FxSettings | null {
   if (typeof window === 'undefined') return null
@@ -130,6 +131,33 @@ function loadStored(): FxSettings | null {
     return merged
   } catch {
     return null
+  }
+}
+
+function loadStoredTuningEnabled(): TuningEnabled {
+  if (typeof window === 'undefined') return defaultTuningEnabled()
+  try {
+    const v = window.localStorage.getItem(TUNING_ENABLED_KEY)
+    if (!v) return defaultTuningEnabled()
+    const parsed = JSON.parse(v) as Partial<TuningEnabled> | null
+    if (typeof parsed !== 'object' || parsed === null) return defaultTuningEnabled()
+    const out = defaultTuningEnabled()
+    for (const k of TUNING_KEYS) {
+      if (typeof parsed[k] === 'boolean') {
+        out[k] = parsed[k]
+      }
+    }
+    return out
+  } catch {
+    return defaultTuningEnabled()
+  }
+}
+
+function saveTuningEnabled(enabled: TuningEnabled): void {
+  try {
+    window.localStorage.setItem(TUNING_ENABLED_KEY, JSON.stringify(enabled))
+  } catch {
+    // 静默失败
   }
 }
 
@@ -178,7 +206,7 @@ export const useFxSettingsStore = create<FxSettingsState>()(
   subscribeWithSelector((set) => ({
     fx: loadStored() ?? { ...DEFAULT_FX },
     backendPreference: loadStoredPreference(),
-    tuningEnabled: defaultTuningEnabled(),
+    tuningEnabled: loadStoredTuningEnabled(),
     update: (partial) =>
       set((s) => {
         const next = { ...s.fx, ...partial }
@@ -204,11 +232,14 @@ export const useFxSettingsStore = create<FxSettingsState>()(
         return { fx: next }
       }),
     toggleTuning: (key, on) => {
-      set((s) => ({ tuningEnabled: { ...s.tuningEnabled, [key]: on } }))
-      // 让 Tauri 歌词窗口等同屏实例同步
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('hm-fx-changed'))
-      }
+      set((s) => {
+        const next = { ...s.tuningEnabled, [key]: on }
+        saveTuningEnabled(next)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('hm-fx-changed'))
+        }
+        return { tuningEnabled: next }
+      })
     },
     reset: () => {
       persist(DEFAULT_FX)

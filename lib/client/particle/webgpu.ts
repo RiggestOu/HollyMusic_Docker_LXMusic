@@ -395,14 +395,25 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(cos(angle) * r, sin(angle) * r, zPos);
   }
 
-  // 2 ORBIT：球面（无扁率、无环）+ treble 起毛刺、bass 整体膨胀（移除了 yaw 自转）
+  // 2 ORBIT：球面 + treble 起毛刺、bass 整体膨胀 + 整体自转（对齐 Mineradio）
   if (s < 2.5) {
     let theta = uv.x * 6.283185307179586;
     let phi = (uv.y - 0.5) * 3.141592653589793;
+    let K = u.intensity * 1.6;
     let trebFlare = snoise(vec3<f32>(theta * 1.5, phi * 1.5, t * 0.7)) * u.treble * 0.85 * K;
     let bassExpand = u.bass * 0.35 * K;
-    let r = 2.2 * (1.0 + bassExpand) + trebFlare;
-    return vec3<f32>(r * cos(phi) * cos(theta), r * sin(phi), r * cos(phi) * sin(theta));
+    let baseR = 2.2;
+    let r = baseR * (1.0 + bassExpand) + trebFlare;
+    let x = r * cos(phi) * cos(theta);
+    let y = r * sin(phi);
+    let z = r * cos(phi) * sin(theta);
+    // 整体自转（对齐 Mineradio 的 yaw = t * 0.18）
+    let yaw = t * 0.18;
+    let cy = cos(yaw);
+    let sy = sin(yaw);
+    let xz = cy * x - sy * z;
+    let z2 = sy * x + cy * z;
+    return vec3<f32>(xz, y, z2);
   }
 
   // 3 VOID：无粒子 —— 几何推到远处，渲染阶段把 alpha 压 0（其原式即 vAlpha = 0）
@@ -410,14 +421,14 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(c.x * 0.01, c.y * 0.01, -90.0);
   }
 
-  // 4 VINYL RECORD：中心封面 + 黑胶沟槽 + 完整白边 + 盘面自转（对齐 Mineradio uVinylSpin）
+  // 4 VINYL RECORD：中心封面 + 黑胶沟槽 + 完整白边 + 盘面Z轴自转（顺时针，2倍速）
   if (s < 4.5) {
-    let spin = u.time * u.speed * 0.15; // 持续缓慢旋转，对齐 Mineradio 的 uVinylSpin
+    let spin = -u.time * u.speed * 0.30; // 顺时针（负号）+ 2倍速（0.15→0.30）
     let cs = cos(spin);
     let sn = sin(spin);
     let p = (uv - vec2<f32>(0.5, 0.5)) * 5.12;
-    // 应用旋转变换
-    let rp = vec2<f32>(cs * p.x - sn * p.y, sn * p.x + cs * p.y);
+    // 顺时针旋转（YZ平面内的XZ旋转，只影响唱片平面内的点）
+    let rp = vec2<f32>(cs * p.x + sn * p.y, -sn * p.x + cs * p.y);
     let d = length(rp);
     let recordR = 2.46;
     let coverR = 1.18;
@@ -438,25 +449,16 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(rp.x * radial, rp.y * radial, select(zVinyl, zCover, inside > 0.02));
   }
 
-  // 6 安魂（骷髅点云）：坐标来自外部点云资源（setSkullPoints 写入 anchor 字段），
-  //   对齐 Mineradio 的 float-skull-backcover.js：整体旋转 + 微弱漂移，无拉伸缩放
+  // 6 安魂（骷髅点云）：坐标来自外部点云资源（setSkullPoints 写入 anchor 字段）
+  //   无自转、无缩放，保持静态
   //   【关键：必须有 return，否则会继续落入下方 s<8.5 WALLPAPER PULSE 分支变成"矩阵"】
   if (s > 5.5 && s < 6.5) {
-    // 整体旋转（对齐 Mineradio 的 orbit 逻辑）
-    let orbit = t * 0.03;
-    let cs = cos(orbit);
-    let sn = sin(orbit);
-    let rx = cs * anchor.x - sn * anchor.y;
-    let ry = sn * anchor.x + cs * anchor.y;
-    // 微弱漂移（对齐 Mineradio 的 aAmp * 0.34 等）
-    let driftX = sin(t * 0.18 + p.seed * 6.28) * 0.04;
-    let driftY = cos(t * 0.15 + p.seed * 6.28) * 0.035;
-    let driftZ = sin(t * 0.11 + p.seed * 6.28) * 0.06;
-    return vec3<f32>(rx + driftX, ry + driftY, anchor.z + driftZ);
+    return anchor;
   }
 
-  // 5-8 WALLPAPER PULSE：螺旋极光带（lane<0.80）+ 远景尘埃（lane>=0.80）+ 切换脉冲
-  if (s < 8.5) {
+  // 7-8 WALLPAPER PULSE：螺旋极光带（lane<0.80）+ 远景尘埃（lane>=0.80）+ 切换脉冲
+  // 【关键：必须排除 preset 5（星河），否则 preset 5 会错误走这里】
+  if (s > 6.5 && s < 8.5) {
     let lane = uv.y;
     var pos: vec3<f32>;
     if (lane < 0.80) {
@@ -632,8 +634,8 @@ fn presetPalette(preset: f32, uv: vec2<f32>, seed: f32, bass: f32) -> vec3<f32> 
       uv.y
     );
   }
-  // 5-8 音域回响：极光带（青 → 紫）
-  if (s < 8.5) {
+  // 7-8 音域回响：极光带（青 → 紫）
+  if (s > 6.5 && s < 8.5) {
     let aurora = mix(vec3<f32>(0.52, 0.86, 1.00), vec3<f32>(0.70, 0.58, 1.00), uv.y);
     return mix(aurora, vec3<f32>(0.96, 0.98, 0.92), smoothstep(0.07, 0.78, bass) * 0.05);
   }

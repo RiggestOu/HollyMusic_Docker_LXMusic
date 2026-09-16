@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Home, Search, Heart, ListMusic, History, Music2, LogIn, LogOut, User, ChevronUp, Settings, KeyRound, Shuffle } from 'lucide-react'
+import { Home, Search, Heart, ListMusic, History, Music2, LogIn, LogOut, User, ChevronUp, Settings, KeyRound, Shuffle, HardDrive } from 'lucide-react'
 import { useAuthStore } from '@/hooks/useAuth'
 
 const nav = [
@@ -9,6 +9,7 @@ const nav = [
   { href: '/search', label: '搜索', icon: Search, protected: true },
   { href: '/favorites', label: '收藏', icon: Heart, protected: true },
   { href: '/playlists', label: '歌单', icon: ListMusic, protected: true },
+  { href: '/local', label: '本地音乐', icon: HardDrive, protected: true },
   { href: '/history', label: '历史', icon: History, protected: true },
 ]
 

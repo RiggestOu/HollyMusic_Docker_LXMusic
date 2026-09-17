@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import type { PlaylistSummary } from '@/lib/api/playlists'
-import { MoreHorizontal, Pencil, Trash2, Download } from 'lucide-react'
+import { MoreHorizontal, Pencil, Trash2, Download, Check } from 'lucide-react'
 import { PlaylistCover } from './PlaylistCover'
 
 interface Props {
@@ -206,6 +206,25 @@ export function PlaylistGrid({
               setOpenMenuId(playlist.id)
             }}
           >
+            {/* 左下角复选框 */}
+            {multiSelect && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  onToggleSelect?.(playlist.id)
+                }}
+                className={`absolute bottom-2 left-2 z-10 h-5 w-5 rounded border-2 flex items-center justify-center transition ${
+                  isSelected
+                    ? 'bg-primary border-primary text-primary-foreground'
+                    : 'border-muted-foreground/40 bg-background/80 hover:border-primary'
+                }`}
+                aria-label={isSelected ? '取消选中' : '选中歌单'}
+              >
+                {isSelected && <Check className="h-3 w-3" />}
+              </button>
+            )}
             <Link to={`/playlists/${playlist.id}`} className="flex flex-col gap-2" onClick={e => {
               if (!multiSelect) return
               // Ctrl/Cmd+点击：切换选中且不跳转详情页

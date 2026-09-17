@@ -79,8 +79,10 @@ export interface ImportPlaylist {
 
 export interface ImportResult {
   created: Array<{ id: number; name: string; count: number }>
+  merged: Array<{ id: number; name: string; count: number }>
   failed: Array<{ name: string; error: string }>
   totalCreated: number
+  totalMerged: number
 }
 
 export function importPlaylists(playlists: ImportPlaylist[]): Promise<ImportResult> {

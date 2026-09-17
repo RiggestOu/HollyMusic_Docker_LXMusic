@@ -16,7 +16,7 @@ import {
   CheckCircle2,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, type PlaylistSummary, type ImportPlaylistSong } from '@/lib/api/playlists'
+import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, type PlaylistSummary, type ImportPlaylistSong, type ImportResult } from '@/lib/api/playlists'
 import type { MusicInfo } from '@/lib/types/music'
 import { useAuthStore } from '@/hooks/useAuth'
 import { usePlaylists } from '@/hooks/usePlaylists'
@@ -323,7 +323,8 @@ export function PlaylistsPage() {
           (result.failed.length > 0 ? `，失败明细: ${JSON.stringify(result.failed)}` : ''))
         await reload()
         const dedupMsg = totalDeduplicated > 0 ? `，已自动去重 ${totalDeduplicated} 条` : ''
-        alert(`导入完成：成功 ${result.totalCreated} 个歌单${dedupMsg}，失败 ${result.failed.length} 个`)
+        const mergedMsg = result.totalMerged > 0 ? `，合并同名歌单 ${result.totalMerged} 个` : ''
+        alert(`导入完成：新建 ${result.totalCreated} 个${mergedMsg}${dedupMsg}，失败 ${result.failed.length} 个`)
         return
       }
 
@@ -513,37 +514,20 @@ export function PlaylistsPage() {
 
   return (
     <div className="p-6">
+      {/* 标题和工具栏 */}
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="hidden text-2xl font-bold md:block">我的歌单</h1>
+        <h1 className="text-2xl font-bold">我的歌单</h1>
         <div className="flex flex-wrap items-center gap-2">
-          {/* 排序选项 */}
-          <div className="flex items-center gap-1 rounded-full border border-border px-2 py-1 text-sm">
-            <span className="px-2 text-muted-foreground">排序:</span>
-            <button
-              onClick={() => { setSortField('name'); setSortAsc(true) }}
-              className={`px-2 py-1 rounded transition hover:bg-muted ${sortField === 'name' && sortAsc ? 'bg-primary/15 text-primary' : ''}`}
-            >
-              名称↑
-            </button>
-            <button
-              onClick={() => { setSortField('name'); setSortAsc(false) }}
-              className={`px-2 py-1 rounded transition hover:bg-muted ${sortField === 'name' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
-            >
-              名称↓
-            </button>
-            <button
-              onClick={() => { setSortField('songCount'); setSortAsc(false) }}
-              className={`px-2 py-1 rounded transition hover:bg-muted ${sortField === 'songCount' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
-            >
-              歌曲数↓
-            </button>
-            <button
-              onClick={() => { setSortField('createdAt'); setSortAsc(false) }}
-              className={`px-2 py-1 rounded transition hover:bg-muted ${sortField === 'createdAt' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
-            >
-              最新创建↓
-            </button>
-          </div>
+          {/* 自动整合歌单 - 常显按钮 */}
+          <button
+            onClick={() => setShowMerge(true)}
+            disabled={merging}
+            className="flex items-center gap-1 rounded-full bg-primary/15 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/25 disabled:opacity-50"
+          >
+            <Merge className="h-4 w-4" />
+            {merging ? '整合中…' : '自动整合歌单'}
+          </button>
+
           {/* 批量删除按钮 */}
           {selectedIds.size > 0 && (
             <button
@@ -670,6 +654,35 @@ export function PlaylistsPage() {
           className="hidden"
           onChange={handleImportFile}
         />
+      </div>
+
+      {/* 排序选项 - 在标题下方 */}
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-sm text-muted-foreground">排序:</span>
+        <button
+          onClick={() => { setSortField('name'); setSortAsc(true) }}
+          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'name' && sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+        >
+          名称↑
+        </button>
+        <button
+          onClick={() => { setSortField('name'); setSortAsc(false) }}
+          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'name' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+        >
+          名称↓
+        </button>
+        <button
+          onClick={() => { setSortField('songCount'); setSortAsc(false) }}
+          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'songCount' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+        >
+          歌曲数↓
+        </button>
+        <button
+          onClick={() => { setSortField('createdAt'); setSortAsc(false) }}
+          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'createdAt' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+        >
+          最新创建↓
+        </button>
       </div>
 
       {loading ? (

@@ -27,7 +27,7 @@
   Sleep 800
 
   DetailPrint "正在清理旧版本程序文件 ..."
-  ${GetInstallDir} INSTALL_DIR
+  GetInstallDir INSTALL_DIR
   IfFileExists "$INSTALL_DIR\*" 0 +3
     ; 删除所有文件和子目录（保留目录本身以便后续写入）
     RMDir /r /REBOOTOK "$INSTALL_DIR"
@@ -49,7 +49,7 @@
   Sleep 800
 
   DetailPrint "正在清理安装目录 ..."
-  ${GetInstallDir} INSTALL_DIR
+  GetInstallDir INSTALL_DIR
   IfFileExists "$INSTALL_DIR\*" 0 +2
     RMDir /r /REBOOTOK "$INSTALL_DIR"
   ${EndIf}

@@ -71,13 +71,13 @@ jobs:
           FILE="hollymusic_docker_lxmusic-latest.tar.gz"
 
           # 获取 release ID（已存在则复用，否则创建）
-          RELEASE_ID=$(curl -s \
+          RELEASE_ID=$(curl -s --max-time 60 \
             -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
             | jq -r '.id // empty')
 
           if [ -z "$RELEASE_ID" ]; then
-            RELEASE_ID=$(curl -s -X POST \
+            RELEASE_ID=$(curl -s --max-time 60 -X POST \
               -H "Authorization: token $GITHUB_TOKEN" \
               -H "Content-Type: application/json" \
               -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"make_latest\":\"true\",\"body\":\"Docker 镜像离线包（docker save 导出，含 latest tag）。\\n导入：gzip -d ${FILE} | docker load\"}" \
@@ -87,38 +87,41 @@ jobs:
           fi
 
           # 删除旧的同名 asset（如果有）
-          curl -s \
+          curl -s --max-time 60 \
             -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
             | jq -r '.[] | select(.name == "'"$FILE"'") | .id' \
             | while read -r ASSET_ID; do
                 echo "Deleting old asset id=$ASSET_ID"
-                curl -s -X DELETE \
+                curl -s --max-time 60 -X DELETE \
                   -H "Authorization: token $GITHUB_TOKEN" \
                   "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$ASSET_ID"
               done
 
-          # 上传新 asset（最多重试 3 次）
+          # 上传新 asset（最多重试 5 次，每次间隔 30 秒）
           UPLOAD_URL="https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$FILE"
           SUCCESS=false
-          for i in 1 2 3; do
+          for i in 1 2 3 4 5; do
             echo "Uploading $FILE (attempt $i)..."
-            if curl -s -L \
+            # 使用 --connect-timeout 和 --max-time 设置超时
+            HTTP_CODE=$(curl -s -L --connect-timeout 30 --max-time 600 \
               -H "Authorization: token $GITHUB_TOKEN" \
               -H "Content-Type: application/octet-stream" \
               -X POST \
               "$UPLOAD_URL" \
               --data-binary "@$FILE" \
-              -o /dev/null -w "%{http_code}" | grep -q "^2"; then
-              echo "Upload succeeded."
+              -o /dev/null -w "%{http_code}")
+            
+            if [[ "$HTTP_CODE" =~ ^2 ]]; then
+              echo "Upload succeeded with HTTP $HTTP_CODE."
               SUCCESS=true
               break
             fi
-            echo "Upload failed, retrying in 10s..."
-            sleep 10
+            echo "Upload failed with HTTP $HTTP_CODE, retrying in 30s..."
+            sleep 30
           done
 
           if [ "$SUCCESS" != "true" ]; then
-            echo "::error::Failed to upload $FILE after 3 attempts"
+            echo "::error::Failed to upload $FILE after 5 attempts"
             exit 1
           fi

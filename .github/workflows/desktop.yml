@@ -75,6 +75,7 @@ jobs:
       # 改用 GitHub API 直接上传 asset（带重试），避免 softprops/action-gh-release
       # 上传大文件时 "other side closed" 且静默不报错的问题。
       - name: Publish installer to Release
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

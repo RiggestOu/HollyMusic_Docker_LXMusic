@@ -335,6 +335,83 @@ export async function deletePlaylistsBatch(ids: number[], username: string): Pro
   return deleted
 }
 
+/**
+ * 自动去重：
+ * 1. 合并同名歌单（歌曲合并后删除原歌单）
+ * 2. 清除各歌单内的重复歌曲
+ */
+export async function deduplicatePlaylists(username: string): Promise<{
+  mergedPlaylists: number
+  deletedPlaylists: number
+  removedDuplicates: number
+}> {
+  // 1. 获取用户所有歌单
+  const playlists = await listPlaylistsForUser(username)
+
+  // 2. 找出同名歌单
+  const byName = new Map<string, number[]>()
+  for (const pl of playlists) {
+    const key = pl.name.toLowerCase().trim()
+    if (!byName.has(key)) byName.set(key, [])
+    byName.get(key)!.push(pl.id)
+  }
+
+  let mergedPlaylists = 0
+  let deletedPlaylists = 0
+  let removedDuplicates = 0
+
+  // 3. 合并同名歌单
+  for (const [name, ids] of byName.entries()) {
+    if (ids.length <= 1) continue
+
+    logger.info(`[dedup] 发现同名歌单「${name}」(${ids.length}个)，开始合并`)
+    const mainId = ids[0]
+
+    // 收集所有歌曲ID
+    const allSongIds = new Set<string>()
+    for (const id of ids.slice(1)) {
+      const detail = await getPlaylistDetail(id, username)
+      if (detail) {
+        for (const entry of detail.entries) {
+          if (entry.songId) allSongIds.add(entry.songId)
+        }
+        deletedPlaylists += await deletePlaylist(id, username)
+      }
+    }
+
+    // 添加到主歌单
+    if (allSongIds.size > 0) {
+      await addSongsToPlaylist(mainId, username, Array.from(allSongIds))
+      mergedPlaylists++
+    }
+  }
+
+  // 4. 清除各歌单内的重复歌曲
+  for (const pl of playlists) {
+    const detail = await getPlaylistDetail(pl.id, username)
+    if (!detail || detail.entries.length <= 1) continue
+
+    const seen = new Set<string>()
+    const duplicates: number[] = []
+    for (const entry of detail.entries) {
+      if (seen.has(entry.songId)) {
+        duplicates.push(entry.position)
+      } else {
+        seen.add(entry.songId)
+      }
+    }
+
+    if (duplicates.length > 0) {
+      await removeSongsFromPlaylist(pl.id, username, duplicates)
+      removedDuplicates += duplicates.length
+      logger.info(`[dedup] 歌单「${pl.name}」清除了 ${duplicates.length} 首重复歌曲`)
+    }
+  }
+
+  logger.info(`[dedup] 去重完成：合并${mergedPlaylists}个歌单，删除${deletedPlaylists}个，清除${removedDuplicates}首重复歌曲`)
+  return { mergedPlaylists, deletedPlaylists, removedDuplicates }
+}
+
 // ---- 内部工具 ----
 
 async function assertOwner(id: number, username: string): Promise<void> {

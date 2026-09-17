@@ -7,7 +7,7 @@
 import { NextRequest } from 'next/server'
 import { createSuccessResponse, createErrorResponse, ErrorCodes } from '@/lib/api-response'
 import { requireUser, AuthError } from '@/lib/services/user-context'
-import { createPlaylist, updatePlaylistMeta, addSongsToPlaylist } from '@/lib/services/playlist-service'
+import { createPlaylist, updatePlaylistMeta, addSongsToPlaylist, listPlaylistsForUser } from '@/lib/services/playlist-service'
 import { upsertMusicInfosInTransaction } from '@/lib/db'
 import { logger } from '@/lib/logger'
 
@@ -55,7 +55,16 @@ export async function POST(
     const totalSongs = body.playlists.reduce((n, p) => n + (Array.isArray(p.songs) ? p.songs.length : 0), 0)
     logger.info(`[import] ===== 开始导入：user=${user.username}，歌单数=${totalPlaylists}，歌曲总数=${totalSongs} =====`)
 
+    // 预加载用户所有歌单，用于去重
+    const existingPlaylists = await listPlaylistsForUser(user.username)
+    const existingByName = new Map<string, number>()
+    for (const pl of existingPlaylists) {
+      existingByName.set(pl.name.toLowerCase().trim(), pl.id)
+    }
+    logger.info(`[import] 当前用户已有 ${existingPlaylists.length} 个歌单`)
+
     const created = []
+    const merged = [] // 合并到已存在歌单的记录
     const failed = []
     let index = 0
 
@@ -67,9 +76,22 @@ export async function POST(
       try {
         logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」开始处理，歌曲数=${songCount}`)
 
-        // 1. 创建歌单
-        const playlist = await createPlaylist(user.username, name)
-        logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」创建成功，id=${playlist.id}`)
+        // 1. 检查是否已存在同名歌单
+        const lowerName = name.toLowerCase()
+        const existingId = existingByName.get(lowerName)
+        let playlist = null
+        let isNew = true
+
+        if (existingId) {
+          playlist = existingId
+          isNew = false
+          logger.info(`[import] (${index}/${totalPlaylists}) 发现同名歌单「${name}」(id=${playlist})，将追加歌曲`)
+        } else {
+          // 创建新歌单
+          const createdPlaylist = await createPlaylist(user.username, name)
+          playlist = createdPlaylist.id
+          logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」创建成功，id=${playlist}`)
+        }
 
         // 2. 更新元数据（含封面）
         const updates: { comment?: string; public?: boolean; coverArt?: string | null } = {}
@@ -77,7 +99,7 @@ export async function POST(
         if (item.isPublic !== undefined) updates.public = item.isPublic
         if (item.coverArt) updates.coverArt = item.coverArt
         if (Object.keys(updates).length > 0) {
-          await updatePlaylistMeta(playlist.id, user.username, updates)
+          await updatePlaylistMeta(playlist, user.username, updates)
           logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」元数据已更新，fields=${Object.keys(updates).join(',')}`)
         }
 
@@ -96,23 +118,34 @@ export async function POST(
           logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」musicInfo 批量 upsert 完成，条数=${musicInfos.length}`)
         }
 
-        // 4. 添加歌曲到歌单（分批处理，每批 200 条）
+        // 4. 添加歌曲到歌单（去重，分批处理，每批 200 条）
         const songIds = item.songs
           .filter(s => s.songId)
           .map(s => s.songId!)
 
         if (songIds.length > 0) {
-          for (let i = 0; i < songIds.length; i += BATCH_SIZE) {
+          // 去重：同一歌单内相同 songId 只添加一次
+          const uniqueSongIds = [...new Set(songIds)]
+          let addedCount = 0
+          let skippedCount = 0
+
+          for (let i = 0; i < uniqueSongIds.length; i += BATCH_SIZE) {
             await timeoutCheck()
-            const batch = songIds.slice(i, i + BATCH_SIZE)
-            await addSongsToPlaylist(playlist.id, user.username, batch)
-            logger.info(`[import] (${index}/${totalPlaylists}) 添加歌曲 ${i + 1}-${Math.min(i + BATCH_SIZE, songIds.length)}/${songIds.length}`)
+            const batch = uniqueSongIds.slice(i, i + BATCH_SIZE)
+            await addSongsToPlaylist(playlist, user.username, batch)
+            addedCount += batch.length
+            logger.info(`[import] (${index}/${totalPlaylists}) 添加歌曲 ${i + 1}-${Math.min(i + BATCH_SIZE, uniqueSongIds.length)}/${uniqueSongIds.length}`)
           }
-          logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」添加歌曲完成，条数=${songIds.length}`)
+          skippedCount = songIds.length - uniqueSongIds.length
+          logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」添加歌曲完成，新增=${addedCount}，跳过重复=${skippedCount}`)
         }
 
-        created.push({ id: playlist.id, name, count: item.songs.length })
-        logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」导入成功（id=${playlist.id}，入库歌曲=${item.songs.length}）`)
+        if (isNew) {
+          created.push({ id: playlist, name, count: item.songs.length })
+        } else {
+          merged.push({ id: playlist, name, count: item.songs.length })
+        }
+        logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」处理完成（${isNew ? '新建' : '追加'}，入库歌曲=${item.songs.length}）`)
       } catch (err) {
         logger.error(`[import] (${index}/${totalPlaylists}) 歌单「${name}」导入失败，已处理歌曲数=${songCount}:`, err)
         failed.push({ name: item.name, error: err instanceof Error ? err.message : String(err) })
@@ -120,10 +153,17 @@ export async function POST(
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-    logger.info(`[import] ===== 导入结束：user=${user.username}，成功=${created.length}，失败=${failed.length}，耗时 ${elapsed}s =====` +
+    logger.info(`[import] ===== 导入结束：user=${user.username}，新建=${created.length}，合并=${merged.length}，失败=${failed.length}，耗时 ${elapsed}s =====` +
       (failed.length > 0 ? ` 失败歌单：${failed.map(f => f.name).join('、')}` : ''))
 
-    return createSuccessResponse({ created, failed, totalCreated: created.length, elapsedSec: Number(elapsed) })
+    return createSuccessResponse({
+      created,
+      merged,
+      failed,
+      totalCreated: created.length,
+      totalMerged: merged.length,
+      elapsedSec: Number(elapsed),
+    })
   } catch (err) {
     if (err instanceof AuthError) {
       return createErrorResponse('UNAUTHORIZED', err.message, 401)

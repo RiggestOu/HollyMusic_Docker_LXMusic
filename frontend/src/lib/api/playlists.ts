@@ -102,6 +102,17 @@ export async function importPlaylistsFromFile(file: File): Promise<{ success: nu
   }
 }
 
+export interface DeduplicateResult {
+  ok: boolean
+  mergedPlaylists: number
+  deletedPlaylists: number
+  removedDuplicates: number
+}
+
+export function deduplicatePlaylists(): Promise<DeduplicateResult> {
+  return apiPost('playlists/deduplicate', {})
+}
+
 export function removeSongsFromPlaylist(
   id: number,
   positions: number[]

@@ -339,14 +339,21 @@ export async function deletePlaylistsBatch(ids: number[], username: string): Pro
  * 自动去重：
  * 1. 合并同名歌单（歌曲合并后删除原歌单）
  * 2. 清除各歌单内的重复歌曲
+ * 
+ * 注意：只处理当前用户自己的歌单，不触碰公开歌单或其他用户的歌单
  */
 export async function deduplicatePlaylists(username: string): Promise<{
   mergedPlaylists: number
   deletedPlaylists: number
   removedDuplicates: number
 }> {
-  // 1. 获取用户所有歌单
-  const playlists = await listPlaylistsForUser(username)
+  // 1. 获取用户所有歌单（只获取自己拥有的，不包括公开歌单）
+  const playlists = await prisma.playlist.findMany({
+    where: { username },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  logger.info(`[dedup] 开始去重，user=${username}，自有歌单数=${playlists.length}`)
 
   // 2. 找出同名歌单
   const byName = new Map<string, number[]>()
@@ -388,6 +395,7 @@ export async function deduplicatePlaylists(username: string): Promise<{
     const idsToDelete = ids.slice(1)
     if (idsToDelete.length > 0) {
       deletedPlaylists += await deletePlaylistsBatch(idsToDelete, username)
+      logger.info(`[dedup] 删除了 ${idsToDelete.length} 个同名歌单: ${idsToDelete.join(', ')}`)
     }
   }
 

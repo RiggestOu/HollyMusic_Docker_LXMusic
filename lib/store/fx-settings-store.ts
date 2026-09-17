@@ -266,18 +266,15 @@ export const useFxSettingsStore = create<FxSettingsState>()(
     },
     /** 仅重置调参面板的 14 项（spectrumAmp/flowBase/rippleBright 等），不动动效参数。 */
     resetTuningOnly: () => {
-      const tuningDefaults: Partial<FxSettings> = {}
-      for (const k of TUNING_KEYS) {
-        tuningDefaults[k] = DEFAULT_FX[k] as FxSettings[keyof FxSettings]
-      }
-      persist({ ...DEFAULT_FX })
+      // 恢复调参面板所有参数到默认值
+      persist(DEFAULT_FX)
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('hm-fx-changed'))
       }
-      set((s) => ({
-        fx: { ...s.fx, ...tuningDefaults },
+      set({
+        fx: { ...DEFAULT_FX },
         tuningEnabled: defaultTuningEnabled(),
-      }))
+      })
     },
     /** 重置全部：动效参数 + 调参面板全部项。 */
     resetAll: () => {

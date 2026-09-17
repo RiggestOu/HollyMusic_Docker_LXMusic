@@ -122,9 +122,9 @@ export function PlaylistsPage() {
         return
       }
       await queue.run()
-      reloadLocal()
+      await reloadLocal()
     } catch (e) {
-      toast.info(e instanceof Error ? e.message : '下载失败')
+      toast.error(e instanceof Error ? e.message : '下载失败')
     }
   }
 
@@ -357,8 +357,14 @@ export function PlaylistsPage() {
         }
       }
 
-      const { importPlaylists } = await import('@/lib/api/playlists')
-      const result = await importPlaylists([{ name, comment: null, isPublic: false, songs: merged }])
+      let playlistsLib
+      try {
+        playlistsLib = await import("@/lib/api/playlists")
+      } catch (err) {
+        console.error("[合并] 模块加载失败:", err)
+        throw new Error("加载导入模块失败")
+      }
+      const result = await playlistsLib.importPlaylists([{ name, comment: null, isPublic: false, songs: merged }])
       if (result.failed.length > 0) {
         console.error('[合并] 新歌单创建失败:', result.failed)
         throw new Error(result.failed[0]?.error || '创建新歌单失败')

@@ -46,8 +46,18 @@ export async function POST(request: NextRequest) {
       
       case 'reset': {
         await ensureLensDir()
-        const empty = { version: '1.0', presets: {} }
-        await writeFile(CURRENT_FILE, JSON.stringify(empty, null, 2), 'utf-8')
+        // 从 default_preset.json 加载默认预设
+        const defaultFile = join(LENS_DIR, 'default_preset.json')
+        let defaults = { version: '1.0', presets: {} }
+        try {
+          const raw = await readFile(defaultFile, 'utf-8')
+          defaults = JSON.parse(raw)
+        } catch {
+          // 如果 default_preset.json 不存在，使用空对象
+          logger.warn('[lens-presets] default_preset.json not found, using empty defaults')
+        }
+        await writeFile(CURRENT_FILE, JSON.stringify(defaults, null, 2), 'utf-8')
+        logger.info('[lens-presets] reset to defaults')
         return NextResponse.json({ success: true })
       }
       
@@ -83,9 +93,26 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   try {
     await ensureLensDir()
-    const presets = await loadCurrentFile()
-    return NextResponse.json(presets)
+    const current = await loadCurrentFile()
+
+    // 如果 current 为空，从 default_preset.json 加载默认值
+    if (!current.presets || Object.keys(current.presets).length === 0) {
+      const defaultFile = join(LENS_DIR, 'default_preset.json')
+      try {
+        const raw = await readFile(defaultFile, 'utf-8')
+        const defaults = JSON.parse(raw)
+        await writeFile(CURRENT_FILE, JSON.stringify(defaults, null, 2), 'utf-8')
+        logger.info('[lens-presets] initialized from default_preset.json')
+        return NextResponse.json(defaults)
+      } catch {
+        logger.warn('[lens-presets] default_preset.json not found, using empty presets')
+        return NextResponse.json(current)
+      }
+    }
+
+    return NextResponse.json(current)
   } catch (error) {
+    logger.error('[lens-presets] GET error:', error)
     return NextResponse.json({ error: String(error) }, { status: 500 })
   }
 }

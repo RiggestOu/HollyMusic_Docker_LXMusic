@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Play, ListPlus, Plus, Heart, ListMusic, Download, Share2, UserMinus } from 'lucide-react'
+import { Play, ListPlus, Plus, Heart, ListMusic, Download, Share2, UserMinus, RefreshCw } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useContextMenuStore } from '@/lib/store/context-menu-store'
 import { usePlayerStore } from '@/lib/store/player-store'
@@ -22,9 +22,8 @@ import { toast } from '@/lib/toast'
 import { shareContent, buildSongShareUrl } from '@/lib/share'
 import { AddToPlaylistDialog } from '../../frontend/src/components/playlists/AddToPlaylistDialog'
 import { getPlaylist, removeSongsFromPlaylist } from '@/lib/api/playlists'
-// ponytail: AddToPlaylistDialog 已移至 frontend/src/components/playlists，
-// 根目录共享代码用相对路径引用 frontend 副本，确保 react-router context 与 BrowserRouter 同源，
-// 避免双副本导致 context 为 null（黑屏 bug 根因）
+import { SourceReplacePanel } from '../../frontend/src/components/shared/SourceReplacePanel'
+import type { MusicInfo } from '@/lib/types/music'
 
 const MENU_WIDTH = 192
 const MENU_MAX_HEIGHT = 360
@@ -56,6 +55,7 @@ export function SongContextMenu() {
   const authenticated = useAuthStore(s => s.authenticated)
   const { download } = useDownload()
   const [playlistUid, setPlaylistUid] = useState<string | null>(null)
+  const [showReplace, setShowReplace] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const isMobile = useIsMobile()
 
@@ -135,6 +135,11 @@ export function SongContextMenu() {
       {playlistId != null && (
         <MenuItem icon={UserMinus} label="移出歌单" onClick={handleRemoveFromPlaylist} />
       )}
+      <MenuItem
+        icon={RefreshCw}
+        label="更换音源"
+        onClick={() => { setShowReplace(true); close() }}
+      />
       {authenticated && (
         <MenuItem
           icon={Download}
@@ -179,6 +184,23 @@ export function SongContextMenu() {
         </div>
       )}
       {playlistDialog}
+      {showReplace && menu?.track && (
+        <SourceReplacePanel
+          track={{
+            uid: menu.track.uid,
+            name: menu.track.name,
+            artist: menu.track.artist,
+            musicInfo: menu.track.musicInfo,
+          }}
+          onClose={() => setShowReplace(false)}
+          onSwitch={(newMusicInfo) => {
+            // 通知父组件更新歌曲音源
+            window.dispatchEvent(new CustomEvent('song-source-changed', {
+              detail: { uid: menu.track.uid, musicInfo: newMusicInfo }
+            }))
+          }}
+        />
+      )}
     </>
   )
 }

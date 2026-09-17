@@ -1,13 +1,14 @@
 /**
  * 歌单 API
- * GET   /api/playlists        歌单列表
- * POST  /api/playlists {name} 创建歌单
+ * GET    /api/playlists              歌单列表
+ * POST   /api/playlists {name}       创建歌单
+ * DELETE /api/playlists/batch-delete 批量删除歌单
  */
 
 import { NextRequest } from 'next/server'
 import { createSuccessResponse, createErrorResponse, ErrorCodes } from '@/lib/api-response'
 import { requireUser, AuthError } from '@/lib/services/user-context'
-import { listPlaylistsForUser, createPlaylist } from '@/lib/services/playlist-service'
+import { listPlaylistsForUser, createPlaylist, deletePlaylist } from '@/lib/services/playlist-service'
 import { logger } from '@/lib/logger'
 
 function authGuard(err: unknown) {

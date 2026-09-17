@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { usePlayerStore } from '@/lib/store/player-store'
 import { useFavoritesStore } from '@/lib/store/favorites-store'
 import { useContextMenuStore } from '@/lib/store/context-menu-store'
@@ -8,10 +9,12 @@ import { useDownloadStatus } from '@@/hooks/useDownloadStatus'
 import { CoverImage } from './CoverImage'
 import { SourceBadge } from './SourceBadge'
 import { QualityBadge } from './QualityBadge'
-import { Play, Pause, Heart, MoreHorizontal, Download, Loader2, CheckCircle } from 'lucide-react'
+import { Play, Pause, Heart, MoreHorizontal, Download, Loader2, CheckCircle, RefreshCw } from 'lucide-react'
 import { formatTime } from '@/lib/utils/format'
 import { resolveQuality } from '@/lib/quality-options'
 import type { Track } from '@/lib/types/player'
+import type { MusicInfo } from '@/lib/types/music'
+import { SourceReplacePanel } from '../../frontend/src/components/shared/SourceReplacePanel'
 
 interface SongRowProps {
   track: Track
@@ -33,6 +36,7 @@ export function SongRow({ track, queue, index, playlistId }: SongRowProps) {
   // 查询下载状态
   const { isDownloaded } = useDownloadStatus([track.uid])
   const downloaded = isDownloaded(track.uid)
+  const [showReplace, setShowReplace] = useState(false)
 
   const isCurrent = currentTrack?.uid === track.uid
   const isCurrentPlaying = isCurrent && isPlaying
@@ -86,6 +90,16 @@ export function SongRow({ track, queue, index, playlistId }: SongRowProps) {
         <div className={`flex items-center gap-2 ${isCurrent ? 'text-primary' : ''}`}>
           <span className="truncate text-sm font-medium">{track.name}</span>
           <QualityBadge musicInfo={track.musicInfo} />
+          {authenticated && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowReplace(true) }}
+              className="shrink-0 rounded p-0.5 text-muted-foreground/50 transition hover:bg-accent hover:text-foreground"
+              title="更换音源"
+              aria-label="更换音源"
+            >
+              <RefreshCw className="h-3 w-3" />
+            </button>
+          )}
         </div>
         <div className="mt-0.5 flex items-center gap-2">
           <span className="truncate text-xs text-muted-foreground">{track.artist}</span>
@@ -156,6 +170,32 @@ export function SongRow({ track, queue, index, playlistId }: SongRowProps) {
       <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
         {formatTime(track.duration)}
       </span>
+
+      {showReplace && (
+        <SourceReplacePanel
+          track={{
+            uid: track.uid,
+            name: track.name,
+            artist: track.artist,
+            musicInfo: track.musicInfo,
+          }}
+          onClose={() => setShowReplace(false)}
+          onSwitch={(newMusicInfo) => {
+            // 更新当前播放的歌曲音源
+            const current = usePlayerStore.getState().currentTrack
+            if (current?.uid === track.uid) {
+              usePlayerStore.setState(s => ({
+                ...s,
+                currentTrack: { ...current, musicInfo: newMusicInfo }
+              }))
+            }
+            // 广播事件，通知父组件更新数据
+            window.dispatchEvent(new CustomEvent('song-source-changed', {
+              detail: { uid: track.uid, musicInfo: newMusicInfo }
+            }))
+          }}
+        />
+      )}
     </div>
   )
 }

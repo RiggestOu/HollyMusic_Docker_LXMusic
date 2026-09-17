@@ -35,6 +35,23 @@ export function pickHighestQuality(types?: unknown): QualityType {
   return '320k'
 }
 
+/** 日志上报工具 */
+async function reportDownloadLog(
+  level: 'info' | 'warn' | 'error' | 'debug',
+  message: string,
+  meta?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await fetch('/api/particle-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level, message, meta }),
+    })
+  } catch {
+    // 网络失败时静默忽略
+  }
+}
+
 export function useDownloadQueue() {
   const [tasks, setTasks] = useState<DownloadTask[]>([])
   const [running, setRunning] = useState(false)
@@ -82,6 +99,10 @@ export function useDownloadQueue() {
       }
       setTasks(list)
       setDoneCount(0)
+
+      // 记录批量下载开始
+      await reportDownloadLog('info', '[download-queue] 开始批量下载', { taskCount: list.length })
+
       return list.length
     },
     [resolveLocal]
@@ -97,24 +118,36 @@ export function useDownloadQueue() {
       if (cancelRef.current) break
       const task = tasks[i]
       patch(task.uid, { status: 'downloading' })
+
+      // 记录单个任务开始
+      await reportDownloadLog('info', '[download-queue] 开始下载任务', { uid: task.uid, quality: task.quality, index: i, total: tasks.length })
+
       try {
         const res = await fetch('/api/download-to-nas', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ uid: task.uid, quality: task.quality }),
         })
-        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; filename?: string; size?: number }
         if (!res.ok || !data.ok) {
           throw new Error(data.error || `HTTP ${res.status}`)
         }
         patch(task.uid, { status: 'done' })
         ok++
+        // 记录成功
+        await reportDownloadLog('info', '[download-queue] 任务成功', { uid: task.uid, quality: task.quality, filename: data.filename, size: data.size })
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
+        console.error(`[download-to-nas] 失败 uid=${task.uid} quality=${task.quality}: ${msg}`)
         patch(task.uid, { status: 'failed', reason: msg })
         failed++
+        // 记录失败
+        await reportDownloadLog('error', '[download-queue] 任务失败', { uid: task.uid, quality: task.quality, error: msg })
       }
       setDoneCount(i + 1)
+
+      // 记录进度
+      await reportDownloadLog('info', '[download-queue] 进度', { index: i + 1, total: tasks.length, ok, failed })
     }
 
     setRunning(false)
@@ -126,6 +159,8 @@ export function useDownloadQueue() {
     } else {
       toast.error(`完成：成功 ${ok} 首，失败 ${failed} 首`)
     }
+    // 记录批量下载完成
+    await reportDownloadLog('info', '[download-queue] 批量下载完成', { ok, failed, cancelled })
     return { ok, failed, cancelled }
   }, [tasks, patch])
 

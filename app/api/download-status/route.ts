@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, AuthError } from '@/lib/services/user-context'
 import { logger } from '@/lib/logger'
-import { getDownloadStatus, markDownloaded, removeDownload, isDownloaded } from '@/lib/download-status'
+import { getDownloadStatus, markDownloaded, removeDownload, isDownloaded, cleanupExpiredRecords } from '@/lib/download-status'
 
 /**
  * GET /api/download-status?uid=...
@@ -10,6 +10,10 @@ import { getDownloadStatus, markDownloaded, removeDownload, isDownloaded } from 
 export async function GET(request: NextRequest) {
   try {
     await requireUser(request)
+
+    // 先清理过期记录（文件已被手动删除的情况）
+    cleanupExpiredRecords()
+
     const uid = request.nextUrl.searchParams.get('uid')
     
     if (uid) {

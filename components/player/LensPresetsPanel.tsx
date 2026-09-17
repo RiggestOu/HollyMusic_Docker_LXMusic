@@ -122,12 +122,16 @@ export function LensPresetsPanel({
   if (!isLoaded) return null
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-t border-border bg-card/50">
-      <Camera className="h-4 w-4 text-muted-foreground" />
-      <span className="text-xs text-muted-foreground">镜头预设:</span>
-      <span className="text-xs font-medium">{currentKey}</span>
+    <div className="flex flex-col gap-1 px-4 py-2 border-t border-border bg-card/50">
+      {/* 第一行：镜头预设名称 */}
+      <div className="flex items-center gap-2">
+        <Camera className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">镜头预设:</span>
+        <span className="text-xs font-medium">{currentKey}</span>
+      </div>
       
-      <div className="ml-auto flex gap-1">
+      {/* 第二行：保存和导入按钮 */}
+      <div className="flex gap-1">
         <button
           onClick={handleSave}
           className="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition hover:bg-accent"
@@ -145,7 +149,10 @@ export function LensPresetsPanel({
           <Upload className="h-3 w-3" />
           <span>导入</span>
         </button>
-        
+      </div>
+      
+      {/* 第三行：删除和恢复默认按钮 */}
+      <div className="flex gap-1">
         <button
           onClick={handleDelete}
           className="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition hover:bg-accent text-destructive"

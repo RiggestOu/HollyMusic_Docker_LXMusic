@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react'
 import { HardDrive, Music4, RefreshCw, Play } from 'lucide-react'
 import { usePlayerStore } from '@/lib/store/player-store'
+import { toTrack } from '@/lib/types/player'
 import { toast } from '@/lib/toast'
+import type { MusicInfo } from '@/lib/types/music'
 
 interface LocalFile {
   name: string
   size: number
   mtime: number
+  uid?: string
+  musicInfo?: MusicInfo
+  localUrl?: string
 }
 
 export function LocalMusicPage() {
@@ -34,12 +39,20 @@ export function LocalMusicPage() {
     void loadFiles()
   }, [])
 
-  const playLocalFile = (name: string) => {
-    const url = `/api/local-music/play?name=${encodeURIComponent(name)}`
+  const playLocalFile = (file: LocalFile) => {
+    if (!file.localUrl || !file.musicInfo) return
     usePlayerStore.setState({
-      streamUrl: url,
+      streamUrl: file.localUrl,
       isPlaying: true,
-      currentTrack: null,
+      currentTrack: {
+        uid: file.uid || '',
+        name: file.musicInfo.name || file.name.replace(/\.\w+$/, ''),
+        artist: file.musicInfo.singer || '未知歌手',
+        album: file.musicInfo.albumName || '',
+        duration: file.musicInfo.interval ? parseInt(file.musicInfo.interval) : 0,
+        source: file.musicInfo.source as 'tx' | 'kw' | 'wy' | 'kg' | 'mg',
+        musicInfo: file.musicInfo,
+      },
       bufferProgress: null,
     })
   }
@@ -100,16 +113,33 @@ export function LocalMusicPage() {
               className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50"
             >
               <button
-                onClick={() => playLocalFile(f.name)}
+                onClick={() => playLocalFile(f)}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90"
                 title="播放"
+                disabled={!f.localUrl}
               >
                 <Play className="h-4 w-4 fill-current" />
               </button>
+              {/* 专辑封面 */}
+              {f.musicInfo?.img && (
+                <img
+                  src={f.musicInfo.img}
+                  alt={f.name}
+                  className="h-8 w-8 shrink-0 rounded object-cover"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+              )}
               <Music4 className="h-4 w-4 shrink-0 text-primary" />
-              <span className="min-w-0 flex-1 truncate text-sm" title={f.name}>
-                {f.name}
-              </span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm" title={f.name}>
+                  {f.name.replace(/\.\w+$/, '')}
+                </span>
+                {f.musicInfo?.singer && (
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {f.musicInfo.singer}
+                  </span>
+                )}
+              </div>
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                 {formatBytes(f.size)}
               </span>

@@ -316,6 +316,24 @@ export async function deletePlaylist(id: number, username: string): Promise<void
   logger.info(`[playlist] deleted ${id}`)
 }
 
+/**
+ * 批量删除歌单（级联删除条目与授权）。仅 owner。
+ */
+export async function deletePlaylistsBatch(ids: number[], username: string): Promise<number> {
+  let deleted = 0
+  for (const id of ids) {
+    try {
+      await assertOwner(id, username)
+      await prisma.playlist.delete({ where: { id } })
+      deleted++
+      logger.info(`[playlist] batch deleted ${id}`)
+    } catch (err) {
+      logger.warn(`[playlist] batch delete failed for ${id}:`, err)
+    }
+  }
+  return deleted
+}
+
 // ---- 内部工具 ----
 
 async function assertOwner(id: number, username: string): Promise<void> {

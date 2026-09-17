@@ -65,6 +65,26 @@ function mapDownloadError(status: number): string {
 export { mapDownloadError }
 
 // ============================================================================
+// 日志上报工具
+// ============================================================================
+
+async function reportDownloadLog(
+  level: 'info' | 'warn' | 'error' | 'debug',
+  message: string,
+  meta?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await fetch('/api/particle-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level, message, meta }),
+    })
+  } catch {
+    // 网络失败时静默忽略
+  }
+}
+
+// ============================================================================
 // hook
 // ============================================================================
 
@@ -90,6 +110,10 @@ export function useDownload() {
   const download = useCallback(async ({ uid, quality = '320k' }: DownloadArgs) => {
     setDownloading(true)
     setError(null)
+
+    // 记录下载开始
+    await reportDownloadLog('info', '[download] 开始下载', { uid, quality })
+
     try {
       const res = await fetch('/api/download-to-nas', {
         method: 'POST',
@@ -106,13 +130,19 @@ export function useDownload() {
         const msg = data.error || mapDownloadError(res.status)
         setError(msg)
         toast.error(msg)
+        // 记录下载失败
+        await reportDownloadLog('error', '[download] 下载失败', { uid, quality, error: msg, httpStatus: res.status })
         return
       }
       toast.success(`已保存到 NAS：${data.filename ?? '完成'}`)
+      // 记录下载成功
+      await reportDownloadLog('info', '[download] 下载成功', { uid, quality, filename: data.filename, size: data.size })
     } catch (e) {
       const msg = e instanceof Error ? e.message : '下载失败'
       setError(msg)
       toast.error(msg)
+      // 记录网络错误
+      await reportDownloadLog('error', '[download] 网络错误', { uid, quality, error: msg })
     } finally {
       setDownloading(false)
     }

@@ -16,7 +16,32 @@ function buildQuery(params?: Record<string, string | number | undefined>): strin
 }
 
 async function parseJson<T>(res: Response): Promise<T> {
-  const json: ApiResponse<T> = await res.json()
+  // 检查 HTTP 状态码
+  if (!res.ok) {
+    // 尝试读取响应文本以诊断问题
+    const text = await res.text().catch(() => '')
+    const contentType = res.headers.get('content-type') || ''
+    // 如果不是 JSON 响应，直接抛出更友好的错误
+    if (!contentType.includes('application/json')) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}（响应类型: ${contentType}，内容: ${text.slice(0, 200)}）`)
+    }
+    try {
+      const json = await JSON.parse(text)
+      throw new Error(json.error?.message || `HTTP ${res.status}`)
+    } catch (e) {
+      throw new Error(`HTTP ${res.status}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  let json: ApiResponse<T>
+  try {
+    json = await res.json()
+  } catch (e) {
+    // JSON 解析失败，读取文本以便调试
+    const text = await res.text().catch(() => '')
+    throw new Error(`JSON.parse: ${e instanceof Error ? e.message : String(e)}\n响应前 200 字符: ${text.slice(0, 200)}`)
+  }
+
   if (!json.success || json.data === undefined) {
     throw new Error(json.error?.message || '请求失败')
   }

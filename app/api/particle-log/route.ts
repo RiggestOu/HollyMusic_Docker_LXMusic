@@ -15,12 +15,13 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { mkdir, appendFile, readFile, stat } from 'node:fs/promises'
+import { mkdir, appendFile, readFile, stat, rm, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { requireUser, AuthError } from '@/lib/services/user-context'
 import { logger } from '@/lib/logger'
 
 const LOG_DIR = process.env.PARTICLE_LOG_DIR || '/app/prisma/prisma/data/log'
+const LOG_RETENTION_DAYS = 2 // 日志保留天数
 
 function logFilePath(dateStr: string): string {
   return path.join(LOG_DIR, `particle-${dateStr}.log`)
@@ -39,10 +40,34 @@ async function appendLogEntry(
 
   await mkdir(LOG_DIR, { recursive: true })
   await appendFile(logFilePath(dateStr), line)
+  
+  // 清理超过保留天数的日志文件
+  await cleanupOldLogs()
+  
   // 同步写一份到服务端 logger，方便服务端自己排查
   if (level === 'error') logger.error(`[particle-log] ${message}`, meta)
   else if (level === 'warn') logger.warn(`[particle-log] ${message}`, meta)
   else logger.info(`[particle-log] ${message}`, meta)
+}
+
+/** 删除超过保留天数的日志文件 */
+async function cleanupOldLogs(): Promise<void> {
+  try {
+    const now = Date.now()
+    const retentionMs = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000
+    const files = await readdir(LOG_DIR)
+    for (const file of files) {
+      if (!file.startsWith('particle-') || !file.endsWith('.log')) continue
+      const filePath = path.join(LOG_DIR, file)
+      const stats = await stat(filePath)
+      if (now - stats.mtimeMs > retentionMs) {
+        await rm(filePath)
+        logger.info(`[particle-log] 已清理过期日志: ${file}`)
+      }
+    }
+  } catch (err) {
+    logger.warn(`[particle-log] 清理日志失败:`, err)
+  }
 }
 
 export async function POST(request: NextRequest) {

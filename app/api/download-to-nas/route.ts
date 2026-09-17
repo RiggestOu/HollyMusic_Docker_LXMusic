@@ -80,6 +80,9 @@ export async function POST(request: NextRequest) {
 
     await audioServe.ensureInitialized()
 
+    // 记录下载开始
+    logger.info(`[download-to-nas] 开始下载 uid=${uid} quality=${quality}`)
+
     // 3. 不传 Range → audioServe 返回 200 完整文件
     const audioResp = await audioServe.serve({
       cacheKey,
@@ -90,7 +93,7 @@ export async function POST(request: NextRequest) {
     })
 
     if (!audioResp.ok || !audioResp.body) {
-      logger.warn(`[download-to-nas] audioServe 返回 ${audioResp.status} uid=${uid}`)
+      logger.warn(`[download-to-nas] audioServe 返回 ${audioResp.status} uid=${uid} quality=${quality}`)
       return NextResponse.json(
         { error: `音频源不可用 (${audioResp.status})` },
         { status: 502 }
@@ -126,14 +129,15 @@ export async function POST(request: NextRequest) {
     } catch (e) {
       await unlink(tmpPath).catch(() => {})
       const msg = e instanceof Error ? e.message : String(e)
-      logger.error(`[download-to-nas] 写入失败 uid=${uid}: ${msg}`)
+      logger.error(`[download-to-nas] 写入失败 uid=${uid} quality=${quality}: ${msg}`)
       return NextResponse.json({ error: `写入 NAS 失败: ${msg}` }, { status: 500 })
     }
   } catch (error) {
     if (error instanceof AuthError) {
+      logger.warn(`[download-to-nas] 未登录 uid=${uid}`)
       return NextResponse.json({ error: error.message }, { status: 401 })
     }
-    logger.error('[download-to-nas] 未预期错误:', error)
+    logger.error(`[download-to-nas] 未预期错误 uid=${uid}:`, error)
     return NextResponse.json({ error: '下载失败' }, { status: 500 })
   }
 }

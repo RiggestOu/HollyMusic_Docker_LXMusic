@@ -70,6 +70,9 @@ async function handleDownloadByUid(
   quality: QualityType,
   clientIP: string
 ): Promise<NextResponse> {
+  // 记录下载开始
+  logger.info(`[download] 开始下载 uid=${uid} quality=${quality} ip=${clientIP}`)
+
   // 1. 从 DB 解析 uid → MusicInfo（搜索时已 upsert，正常流程都有）
   const musicInfo = await resolveMusicInfoById(uid)
   if (!musicInfo) {
@@ -126,7 +129,7 @@ async function handleDownloadByUid(
   headers.set('Content-Disposition', buildContentDisposition(finalFilename))
 
   logger.info(
-    `[download] ok uid=${uid} cacheKey=${cacheKey} ip=${clientIP} status=${audioResp.status}`
+    `[download] ok uid=${uid} quality=${quality} ip=${clientIP} status=${audioResp.status}`
   )
 
   return new NextResponse(audioResp.body, {
@@ -144,7 +147,10 @@ async function handleDownloadByUrl(
   filename: string | null,
   clientIP: string
 ): Promise<NextResponse> {
+  logger.info(`[download] 开始URL模式下载 url=${url.slice(0, 50)}... ip=${clientIP}`)
+
   if (!isValidUrl(url)) {
+    logger.warn(`[download] 无效URL ip=${clientIP}`)
     return NextResponse.json({ error: '无效的 URL' }, { status: 400 })
   }
 
@@ -213,7 +219,7 @@ async function handleDownloadByUrl(
   headers.set('Content-Disposition', buildContentDisposition(finalFilename))
 
   logger.info(
-    `[download] ok(url) url=${url} ip=${clientIP} status=${remoteResponse.status} type=${contentType}`
+    `[download] ok(url) url=${url.slice(0, 50)}... ip=${clientIP} status=${remoteResponse.status} type=${contentType}`
   )
 
   return new NextResponse(pumpBodyWithStallTimeout(remoteResponse.body, stallTimer), {

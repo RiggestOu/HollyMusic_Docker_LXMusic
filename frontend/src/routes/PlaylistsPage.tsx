@@ -291,12 +291,16 @@ export function PlaylistsPage() {
         const deduplicatedPlaylists = data.playlists.map(playlist => {
           const seen = new Set<string>()
           const uniqueSongs: ImportPlaylistSong[] = []
-          for (const song of playlist.songs || []) {
-            if (song.songId && !seen.has(song.songId)) {
-              seen.add(song.songId)
-              uniqueSongs.push(song)
-            }
-          }
+           for (const song of playlist.songs || []) {
+             if (song.songId && !seen.has(song.songId)) {
+               seen.add(song.songId)
+               // 类型断言：将 unknown musicInfo 转换为 MusicInfo
+               uniqueSongs.push({
+                 songId: song.songId,
+                 musicInfo: song.musicInfo as MusicInfo,
+               })
+             }
+           }
           const removed = (playlist.songs?.length || 0) - uniqueSongs.length
           if (removed > 0) {
             console.info(`[导入] 歌单「${playlist.name}」去重：移除 ${removed} 条重复歌曲`)

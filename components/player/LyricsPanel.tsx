@@ -302,7 +302,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
             吞掉所有指针事件 → 相机旋转/平移/拉伸全部失灵（另一模式那层就漏了这一句）。
             歌词行自身再用 pointer-events-auto 收回点击（点行跳转）能力。 */}
         {mode === 'tile' && (
-          <div className="pointer-events-none absolute inset-0 overflow-y-auto px-4 py-8">
+          <div className="hm-lyrics-scroll-container pointer-events-none absolute inset-0 overflow-y-auto px-4 py-8">
             {loading ? (
               <div className="text-center text-white/50">加载歌词...</div>
             ) : hasLyric ? (
@@ -341,7 +341,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
         {/* 同样需要 pointer-events-none：本容器也是 absolute inset-0，否则切到本模式后相机依旧失灵。
             歌词行用 pointer-events-auto 收回点击跳转。 */}
         {mode === 'plane' && (
-          <div className="pointer-events-none absolute inset-0 overflow-y-auto px-4 py-16 [perspective:900px]">
+          <div className="hm-lyrics-scroll-container pointer-events-none absolute inset-0 overflow-y-auto px-4 py-16 [perspective:900px]">
             <div
               className="mx-auto max-w-2xl space-y-6"
               style={{

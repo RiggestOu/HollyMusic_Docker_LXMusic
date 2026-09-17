@@ -63,13 +63,23 @@ export function useDownloadQueue() {
   }, [])
 
   /** 判定本地是否已存在该歌（复用第 13 项的 resolve 接口）。 */
+  /** 判定本地是否已存在该歌（复用第 13 项的 resolve 接口）。 */
   const resolveLocal = useCallback(async (uid: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/local-music/resolve?uid=${encodeURIComponent(uid)}`)
-      if (!res.ok) return false
-      const data = (await res.json().catch(() => ({}))) as { local?: boolean }
+      const url = `/api/local-music/resolve?uid=${encodeURIComponent(uid)}`
+      console.debug('[resolveLocal] checking uid=', uid, 'url=', url)
+      const res = await fetch(url)
+      console.debug('[resolveLocal] uid=', uid, 'status=', res.status, 'ok=', res.ok)
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        console.warn('[resolveLocal] HTTP', res.status, 'uid=', uid, 'body=', text.slice(0, 100))
+        return false
+      }
+      const data = (await res.json().catch(() => ({}))) as { local?: boolean; reason?: string }
+      console.debug('[resolveLocal] uid=', uid, 'data=', JSON.stringify(data))
       return data.local === true
-    } catch {
+    } catch (e) {
+      console.error('[resolveLocal] error uid=', uid, e)
       return false
     }
   }, [])
@@ -84,10 +94,21 @@ export function useDownloadQueue() {
       items: Array<{ uid: string; name?: string; types?: unknown }>,
       skipExisting = true
     ): Promise<number> => {
+      console.log('[enqueue] items.length=', items.length, 'skipExisting=', skipExisting)
       const list: DownloadTask[] = []
+      let skipped = 0
       for (const it of items) {
-        if (!it?.uid) continue
-        if (skipExisting && (await resolveLocal(it.uid))) continue
+        if (!it?.uid) {
+          console.warn('[enqueue] invalid item:', it)
+          continue
+        }
+        if (skipExisting) {
+          const isLocal = await resolveLocal(it.uid)
+          if (isLocal) {
+            skipped++
+            continue
+          }
+        }
         // 同一 uid 不重复入队
         if (list.some(t => t.uid === it.uid)) continue
         list.push({
@@ -97,6 +118,7 @@ export function useDownloadQueue() {
           status: 'pending',
         })
       }
+      console.log('[enqueue] total items=', items.length, 'enqueued=', list.length, 'skipped=', skipped)
       setTasks(list)
       setDoneCount(0)
 

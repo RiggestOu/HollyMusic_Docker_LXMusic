@@ -522,9 +522,9 @@ const VERTEX_SHADER = /* glsl */ `
       base = presetTarget(aUv, aRand, position);
     }
 
-    // 粒子扭曲：绕视轴旋转（原式的 uTwist）
-    if (uTwist > 0.0) {
-      float tw = uTwist * (0.6 + base.z * 0.2);
+    // 粒子扭曲：绕视轴旋转（对齐 Mineradio 公式：uTwist * pos.z * 0.6，仅封面形态）
+    if (uTwist > 0.001 && uPreset < 0.5) {
+      float tw = uTwist * base.z * 0.6;
       float cw = cos(tw), sw = sin(tw);
       base = vec3(cw * base.x - sw * base.y, sw * base.x + cw * base.y, base.z);
     }

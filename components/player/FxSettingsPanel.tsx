@@ -232,44 +232,46 @@ export function ParticleSettingsPanel({ open, onClose }: { open: boolean; onClos
           )}
 
           {tab === 'lyrics' && (
-            <div className="space-y-3">
-              <p className="text-xs text-muted-foreground">选择歌词显示方式</p>
-              <div className="grid grid-cols-3 gap-2">
-                {(Object.entries(MODE_META) as [LyricsMode, typeof MODE_META['tile']][]).map(
-                  ([mode, meta]) => (
-                    <button
-                      key={mode}
-                      onClick={() => {
-                        setLyricsMode(mode)
-                        saveLyricsMode(mode)
-                        // 关键：真正生效的 mode 状态在 LyricsPanel 里（它从 localStorage 惰性初始化），
-                        // 本面板只是入口。必须广播，否则「任何模式都不生效」。
-                        if (typeof window !== 'undefined') {
-                          window.dispatchEvent(new Event(LYRICS_MODE_CHANGED_EVENT))
-                        }
-                      }}
-                      className={`flex flex-col items-center gap-1.5 rounded-lg border px-3 py-3 text-xs transition ${
-                        lyricsMode === mode
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border text-muted-foreground hover:bg-accent'
-                      }`}
-                    >
-                      <meta.icon className="h-5 w-5" />
-                      <span>{meta.label}</span>
-                    </button>
-                  )
-                )}
+            <>
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">选择歌词显示方式</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(Object.entries(MODE_META) as [LyricsMode, typeof MODE_META['tile']][]).map(
+                    ([mode, meta]) => (
+                      <button
+                        key={mode}
+                        onClick={() => {
+                          setLyricsMode(mode)
+                          saveLyricsMode(mode)
+                          // 关键：真正生效的 mode 状态在 LyricsPanel 里（它从 localStorage 惰性初始化），
+                          // 本面板只是入口。必须广播，否则「任何模式都不生效」。
+                          if (typeof window !== 'undefined') {
+                            window.dispatchEvent(new Event(LYRICS_MODE_CHANGED_EVENT))
+                          }
+                        }}
+                        className={`flex flex-col items-center gap-1.5 rounded-lg border px-3 py-3 text-xs transition ${
+                          lyricsMode === mode
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        <meta.icon className="h-5 w-5" />
+                        <span>{meta.label}</span>
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
-            </div>
+
+              {/* 镜头预设管理面板 - 只在歌词显示标签页显示 */}
+              <LensPresetsPanel
+                visualPreset={PRESETS[preset]?.key ?? 'silk'}
+                lyricsMode={lyricsMode}
+                cameraState={{ theta: 0, phi: Math.PI / 2, radius: 6.6, target: [0, 0, 0] }}
+              />
+            </>
           )}
         </div>
-
-        {/* 镜头预设管理面板 */}
-        <LensPresetsPanel
-          visualPreset={PRESETS[preset]?.key ?? 'silk'}
-          lyricsMode={lyricsMode}
-          cameraState={{ theta: 0, phi: Math.PI / 2, radius: 6.6, target: [0, 0, 0] }}
-        />
 
         {/* 底栏：重置 */}
         <div className="shrink-0 border-t border-border px-4 py-3">

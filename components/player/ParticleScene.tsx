@@ -449,10 +449,27 @@ export function ParticleScene({
         })
       }
     }
-    /** 滚轮不控制镜头，转交外层菜单滑块。 */
+    /** 滚轮行为：
+     *   - 中键拖拽模式（mode === 'pan'）：滚轮控制相机平移
+     *   - 歌词区域（pointer-events-none 外的可滚动区域）：不拦截，让浏览器自然滚动
+     *   - 其他情况（模式菜单等）：转交外层菜单滑块
+     * */
     const onWheel = (e: Event) => {
-      e.preventDefault()
-      liveRef.current.onWheelMenu?.((e as WheelEvent).deltaY)
+      const we = e as WheelEvent
+      // 如果目标元素是歌词滚动容器（pointer-events-none），不拦截，让浏览器自然滚动
+      const target = e.target as HTMLElement
+      if (target.closest('.hm-lyrics-scroll-container')) {
+        return // 不 preventDefault，让浏览器处理滚动
+      }
+      if (mode === 'pan') {
+        // 中键拖拽模式下，滚轮控制平移（Y轴方向）
+        we.preventDefault()
+        panBy(0, -we.deltaY, cameraBasis)
+      } else {
+        // 非拖拽模式，转交滚轮到菜单
+        we.preventDefault()
+        liveRef.current.onWheelMenu?.(we.deltaY)
+      }
     }
     const onContextMenu = (e: Event) => e.preventDefault()
 

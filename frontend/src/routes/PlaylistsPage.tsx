@@ -100,17 +100,13 @@ export function PlaylistsPage() {
         try {
           // PlaylistDetail 的歌曲字段名在不同版本可能为 songs / tracks，
           // 这里做防御式读取，避免依赖具体字段名
-          const detail = (await getPlaylist(p.id)) as unknown as Record<string, unknown>
-          const raw = (detail?.songs ?? detail?.tracks ?? []) as Array<{
-            uid?: string
-            name?: string
-            musicInfo?: { types?: unknown }
-          }>
-          const songs = Array.isArray(raw) ? raw : []
+          const detail = await getPlaylist(p.id)
+          // API 返回格式: { entries: [{ songId, musicInfo, ... }] }
+          const songs = Array.isArray(detail?.entries) ? detail.entries : []
           for (const s of songs) {
-            if (!s?.uid || seen.has(s.uid)) continue
-            seen.add(s.uid)
-            all.push({ uid: s.uid, name: s.name, types: s.musicInfo?.types })
+            if (!s?.songId || seen.has(s.songId)) continue
+            seen.add(s.songId)
+            all.push({ uid: s.songId, name: s.musicInfo?.name, types: s.musicInfo?.types })
           }
         } catch {
           // 单个歌单读取失败不阻断整体
@@ -135,16 +131,11 @@ export function PlaylistsPage() {
       return
     }
     try {
-      const detail = (await getPlaylist(playlist.id)) as unknown as Record<string, unknown>
-      const raw = (detail?.songs ?? detail?.tracks ?? []) as Array<{
-        uid?: string
-        name?: string
-        musicInfo?: { types?: unknown }
-      }>
-      const songs = Array.isArray(raw) ? raw : []
+      const detail = await getPlaylist(playlist.id)
+      const songs = Array.isArray(detail?.entries) ? detail.entries : []
       const items = songs
-        .filter(t => !!t?.uid)
-        .map(t => ({ uid: t.uid as string, name: t.name, types: t.musicInfo?.types }))
+        .filter(t => !!t?.songId)
+        .map(t => ({ uid: t.songId, name: t.musicInfo?.name, types: t.musicInfo?.types }))
       const n = await queue.enqueue(items, true)
       if (n === 0) {
         toast.info('该歌单的歌曲本地已存在，无需下载')

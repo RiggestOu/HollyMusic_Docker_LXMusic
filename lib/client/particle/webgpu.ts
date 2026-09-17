@@ -399,7 +399,7 @@ fn presetTarget(uv: vec2<f32>, seed: f32, anchor: vec3<f32>) -> vec3<f32> {
   if (s < 2.5) {
     let theta = uv.x * 6.283185307179586;
     let phi = (uv.y - 0.5) * 3.141592653589793;
-    let K = u.intensity * 1.6;
+    // 直接使用外层已定义的 K，避免重复声明
     let trebFlare = snoise(vec3<f32>(theta * 1.5, phi * 1.5, t * 0.7)) * u.treble * 0.85 * K;
     let bassExpand = u.bass * 0.35 * K;
     let baseR = 2.2;
@@ -716,9 +716,9 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // 现改为与 webgl2 同量级、同公式的**位移**；弹簧只负责平滑趋近，
   // 既保住切预设/切封面的连续过渡观感，目标又有界 → 不再发散。
   var base = tgt;
-  // 粒子扭曲：绕视轴旋转（webgl2 :526-530 同式）
-  if (u.twist > 0.0) {
-    let tw = u.twist * (0.6 + base.z * 0.2);
+  // 粒子扭曲：绕视轴旋转（对齐 Mineradio 公式：uTwist * pos.z * 0.6，仅封面形态）
+  if (u.twist > 0.001 && u.preset < 0.5) {
+    let tw = u.twist * base.z * 0.6;
     let cw = cos(tw);
     let sw = sin(tw);
     base = vec3<f32>(cw * base.x - sw * base.y, sw * base.x + cw * base.y, base.z);

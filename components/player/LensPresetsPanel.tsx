@@ -1,11 +1,7 @@
 /**
  * LensPresetsPanel —— 镜头预设管理面板
- * 
- * 在歌词显示面板底部提供四个按钮：
- * 1. 另存预设 - 保存当前镜头到指定预设
- * 2. 导入预设 - 从文件导入预设
- * 3. 删除预设 - 删除当前预设
- * 4. 恢复默认 - 重置所有预设到默认值
+ *
+ * 在设置面板的歌词显示选项下方，使用与歌词模式相同的卡片样式。
  */
 
 import { useState, useEffect } from 'react'
@@ -32,26 +28,18 @@ export function LensPresetsPanel({
 
   // 加载预设列表
   useEffect(() => {
-    console.info('[LensPresets] 开始加载预设')
     loadPresets().then(data => {
-      console.info('[LensPresets] 加载成功，预设数量:', Object.keys(data.presets).length)
       setPresets(data.presets)
       setIsLoaded(true)
-    }).catch(err => {
-      console.error('[LensPresets] 加载失败:', err)
-    })
+    }).catch(console.error)
   }, [loadPresets])
 
   /** 另存预设 */
   const handleSave = async () => {
-    try {
-      // 弹出输入框让用户输入名称
-      const name = prompt('请输入预设名称:', `${visualPreset}_${lyricsMode}`)
-      if (!name || !name.trim()) {
-        console.info('[LensPresets] 用户取消或输入空名称')
-        return
-      }
+    const name = prompt('请输入预设名称:', `${visualPreset}_${lyricsMode}`)
+    if (!name || !name.trim()) return
 
+    try {
       const preset: LensPreset = {
         visual: visualPreset,
         lyrics_mode: lyricsMode,
@@ -59,14 +47,11 @@ export function LensPresetsPanel({
         name: name.trim(),
         description: `镜头预设: ${name.trim()}`,
       }
-      console.info('[LensPresets] 保存预设:', currentKey, '名称:', name.trim())
       await savePreset(currentKey, preset)
-      // 刷新列表
       const updated = await loadPresets()
       setPresets(updated.presets)
       alert('✅ 预设已保存')
     } catch (err) {
-      console.error('[LensPresets] 保存失败:', err)
       alert('❌ 保存失败: ' + err)
     }
   }
@@ -122,55 +107,73 @@ export function LensPresetsPanel({
   if (!isLoaded) return null
 
   return (
-    <div className="flex flex-col gap-1 px-4 py-2 border-t border-border bg-card/50">
-      {/* 第一行：镜头预设名称 */}
-      <div className="flex items-center gap-2">
-        <Camera className="h-4 w-4 text-muted-foreground" />
+    <div className="mt-3">
+      {/* 标题行 */}
+      <div className="mb-2 flex items-center gap-2">
+        <Camera className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs text-muted-foreground">镜头预设:</span>
         <span className="text-xs font-medium">{currentKey}</span>
       </div>
-      
-      {/* 第二行：保存和导入按钮 */}
-      <div className="flex gap-1">
-        <button
+
+      {/* 操作按钮 - 使用与歌词模式相同的卡片样式 */}
+      <div className="grid grid-cols-2 gap-2">
+        <ActionButton
+          icon={Save}
+          label="另存"
+          description="保存当前镜头"
           onClick={handleSave}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition hover:bg-accent"
-          title="另存当前镜头为预设"
-        >
-          <Save className="h-3 w-3" />
-          <span>另存</span>
-        </button>
-        
-        <button
+        />
+        <ActionButton
+          icon={Upload}
+          label="导入"
+          description="从文件导入"
           onClick={handleImport}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition hover:bg-accent"
-          title="从文件导入预设"
-        >
-          <Upload className="h-3 w-3" />
-          <span>导入</span>
-        </button>
-      </div>
-      
-      {/* 第三行：删除和恢复默认按钮 */}
-      <div className="flex gap-1">
-        <button
+        />
+        <ActionButton
+          icon={Trash2}
+          label="删除"
+          description="删除当前预设"
           onClick={handleDelete}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition hover:bg-accent text-destructive"
-          title="删除当前预设"
-        >
-          <Trash2 className="h-3 w-3" />
-          <span>删除</span>
-        </button>
-        
-        <button
+          destructive
+        />
+        <ActionButton
+          icon={RotateCcw}
+          label="默认"
+          description="恢复出厂设置"
           onClick={handleReset}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition hover:bg-accent"
-          title="恢复所有预设为默认"
-        >
-          <RotateCcw className="h-3 w-3" />
-          <span>默认</span>
-        </button>
+        />
       </div>
     </div>
+  )
+}
+
+/** 统一的按钮样式组件 */
+function ActionButton({
+  icon: Icon,
+  label,
+  description,
+  onClick,
+  destructive = false,
+}: {
+  icon: React.ElementType
+  label: string
+  description: string
+  onClick: () => void
+  destructive?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={description}
+      className={`flex flex-col items-center gap-1.5 rounded-lg border px-3 py-3 text-xs transition ${
+        destructive
+          ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
+          : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
+      }`}
+    >
+      <Icon className="h-5 w-5" />
+      <span className="font-medium">{label}</span>
+      <span className="text-[10px] opacity-70">{description}</span>
+    </button>
   )
 }

@@ -1,7 +1,7 @@
 /**
  * 日志管理器
  * 支持不同日志级别，根据环境自动调整
- * 同时写控制台 + 落盘文件（按日期分文件）
+ * 同时写控制台 + 落盘文件（合并到一个文件）
  */
 
 import { appendFile, mkdir } from 'node:fs/promises'
@@ -18,6 +18,7 @@ class Logger {
   private level: LogLevel
   private isDevelopment: boolean
   private logDir: string
+  private logFile: string
 
   constructor() {
     this.isDevelopment = process.env.NODE_ENV === 'development'
@@ -25,6 +26,8 @@ class Logger {
     this.level = this.isDevelopment ? LogLevel.DEBUG : LogLevel.INFO
     // 日志目录：优先使用环境变量，否则用 prisma_data 下的 log 目录
     this.logDir = process.env.LOG_DIR || '/app/prisma/prisma/data/log'
+    // 合并到一个日志文件
+    this.logFile = path.join(this.logDir, 'app.log')
   }
 
   private formatMessage(level: string, message: string, ...args: unknown[]): string {
@@ -39,15 +42,10 @@ class Logger {
     return level >= this.level
   }
 
-  private getLogFilePath(): string {
-    const dateStr = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
-    return path.join(this.logDir, `download-${dateStr}.log`)
-  }
-
   private async appendToFile(message: string): Promise<void> {
     try {
       await mkdir(this.logDir, { recursive: true })
-      await appendFile(this.getLogFilePath(), message + '\n')
+      await appendFile(this.logFile, message + '\n')
     } catch {
       // 文件写入失败不影响主流程，静默忽略
     }

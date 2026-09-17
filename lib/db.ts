@@ -59,6 +59,60 @@ export async function getMusicInfo(source: string, songmid: string): Promise<Mus
 }
 
 /**
+ * 批量查询多首歌曲的 MusicInfo（高性能版本）
+ * 使用 IN 子句一次性查询，避免 N+1 问题
+ * @param uids - 歌曲 uid 列表，格式为 "source-songmid"
+ * @returns uid -> MusicInfo 的映射
+ */
+export async function getMusicInfosByUids(uids: string[]): Promise<Map<string, MusicInfo>> {
+  const result = new Map<string, MusicInfo>()
+  if (uids.length === 0) return result
+
+  try {
+    // 解析 uid 为 (source, songmid) 对
+    const pairs: Array<{ source: string; songmid: string }> = []
+    for (const uid of uids) {
+      const idx = uid.indexOf('-')
+      if (idx <= 0) continue
+      const source = uid.substring(0, idx)
+      const songmid = uid.substring(idx + 1)
+      if (!source || !songmid) continue
+      pairs.push({ source, songmid })
+    }
+
+    if (pairs.length === 0) return result
+
+    // 批量查询
+    const placeholders = pairs.map(() => '(?, ?)').join(', ')
+    const params = pairs.flatMap(p => [p.source, p.songmid])
+
+    const rows = await prisma.musicInfo.findMany({
+      where: {
+        source_songmid: {
+          in: pairs.map(p => ({ source: p.source, songmid: p.songmid })),
+        },
+      },
+    })
+
+    for (const row of rows) {
+      if (row.data) {
+        try {
+          const mi = JSON.parse(row.data) as MusicInfo
+          const uid = `${mi.source}-${mi.songmid}`
+          result.set(uid, mi)
+        } catch {
+          // 跳过解析失败的记录
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('getMusicInfosByUids error', e)
+  }
+
+  return result
+}
+
+/**
  * 统一的 id → MusicInfo 解析入口。
  *
  * 对外 song id 统一为 `source-songmid` 复合格式（见 subsonic-search / subsonic-getstarred），
@@ -499,6 +553,7 @@ export async function upsertMusicInfosInTransaction(musicInfos: MusicInfo[]): Pr
 
 const dbAPI = {
   getMusicInfo,
+  getMusicInfosByUids,
   getFirstMusicInfoByAlbumId,
   getFirstMusicInfoByArtistAndTitle,
   getMusicInfoListByAlbumId,

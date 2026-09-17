@@ -58,6 +58,24 @@ export function PlaylistsPage() {
     usePlayerStore.setState({ streamUrl: url, isPlaying: true, currentTrack: null, bufferProgress: null })
   }
 
+  // 歌单排序方式
+  type PlaylistSort = 'name' | 'songCount' | 'createdAt'
+  const [sortField, setSortField] = useState<PlaylistSort>('createdAt')
+  const [sortAsc, setSortAsc] = useState(false)
+
+  // 排序后的歌单列表
+  const sortedPlaylists = [...playlists].sort((a, b) => {
+    let cmp = 0
+    if (sortField === 'name') {
+      cmp = a.name.localeCompare(b.name, 'zh-CN')
+    } else if (sortField === 'songCount') {
+      cmp = (a.songCount || 0) - (b.songCount || 0)
+    } else {
+      cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    }
+    return sortAsc ? cmp : -cmp
+  })
+
   // 本地音乐（第 12 项：浏览 NAS 落盘目录）
   interface LocalFile {
     name: string
@@ -264,17 +282,41 @@ export function PlaylistsPage() {
       const text = await file.text()
       const data = JSON.parse(text) as PlaylistExportFile
       if (!data || !Array.isArray(data.playlists)) throw new Error('文件格式不正确')
-      console.info(`[导入] 解析成功：version=${data.version ?? 1}，歌单数=${data.playlists.length}，歌曲总数=${data.playlists.reduce((n, p) => n + ((p.songs || []) as unknown[]).length, 0)}`)
+      console.info(`[导入] 解析成功：version=${data.version ?? 1}，歌单数=${data.playlists.length}`)
 
       // Version 2 format: pass musicInfo to backend
       if (data.version === 2) {
+        // 前端去重：每个歌单内的 songId 去重
+        let totalDeduplicated = 0
+        const deduplicatedPlaylists = data.playlists.map(playlist => {
+          const seen = new Set<string>()
+          const uniqueSongs: ImportPlaylistSong[] = []
+          for (const song of playlist.songs || []) {
+            if (song.songId && !seen.has(song.songId)) {
+              seen.add(song.songId)
+              uniqueSongs.push(song)
+            }
+          }
+          const removed = (playlist.songs?.length || 0) - uniqueSongs.length
+          if (removed > 0) {
+            console.info(`[导入] 歌单「${playlist.name}」去重：移除 ${removed} 条重复歌曲`)
+            totalDeduplicated += removed
+          }
+          return { ...playlist, songs: uniqueSongs }
+        })
+
+        if (totalDeduplicated > 0) {
+          console.info(`[导入] 共去重 ${totalDeduplicated} 条歌曲`)
+        }
+
         const { importPlaylists } = await import('@/lib/api/playlists')
         console.info('[导入] v2 格式：调用后端批量导入接口...')
-        const result = await importPlaylists(data.playlists as any)
+        const result = await importPlaylists(deduplicatedPlaylists as any)
         console.info(`[导入] 后端返回：成功 ${result.totalCreated} 个歌单，失败 ${result.failed.length} 个` +
           (result.failed.length > 0 ? `，失败明细: ${JSON.stringify(result.failed)}` : ''))
         await reload()
-        alert(`导入完成：成功 ${result.totalCreated} 个歌单，失败 ${result.failed.length} 个`)
+        const dedupMsg = totalDeduplicated > 0 ? `，已自动去重 ${totalDeduplicated} 条` : ''
+        alert(`导入完成：成功 ${result.totalCreated} 个歌单${dedupMsg}，失败 ${result.failed.length} 个`)
         return
       }
 
@@ -283,6 +325,7 @@ export function PlaylistsPage() {
       let created = 0
       let failed = 0
       let idx = 0
+      let totalDeduplicated = 0
       for (const item of data.playlists) {
         idx++
         const name = (item.name || '').trim() || '导入的歌单'
@@ -293,7 +336,21 @@ export function PlaylistsPage() {
           if (item.comment !== undefined) updates.comment = item.comment ?? undefined
           if (item.isPublic !== undefined) updates.public = item.isPublic
           if (Object.keys(updates).length > 0) await updatePlaylist(p.id, updates)
-          const songIds = (item.songs || []).map(s => s.songId).filter(Boolean)
+          const rawSongIds = (item.songs || []).map(s => s.songId).filter(Boolean)
+          // 前端去重：同一歌单内 songId 去重
+          const seen = new Set<string>()
+          const songIds: string[] = []
+          for (const sid of rawSongIds) {
+            if (!seen.has(sid)) {
+              seen.add(sid)
+              songIds.push(sid)
+            }
+          }
+          const removed = rawSongIds.length - songIds.length
+          if (removed > 0) {
+            console.info(`[导入] 歌单「${name}」去重：移除 ${removed} 条重复歌曲`)
+            totalDeduplicated += removed
+          }
           if (songIds.length > 0) await addSongsToPlaylist(p.id, songIds)
           created++
           console.info(`[导入] (${idx}/${data.playlists.length}) 歌单「${name}」导入成功，歌曲数=${songIds.length}`)
@@ -304,7 +361,8 @@ export function PlaylistsPage() {
       }
       console.info(`[导入] 全部结束：成功 ${created} 个，失败 ${failed} 个`)
       await reload()
-      alert(`导入完成：成功 ${created} 个，失败 ${failed} 个`)
+      const dedupMsg = totalDeduplicated > 0 ? `，已自动去重 ${totalDeduplicated} 条` : ''
+      alert(`导入完成：成功 ${created} 个歌单${dedupMsg}，失败 ${failed} 个`)
     } catch (error) {
       console.error('[导入] 文件处理失败:', error)
       alert(error instanceof Error ? error.message : '导入失败')
@@ -451,6 +509,34 @@ export function PlaylistsPage() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="hidden text-2xl font-bold md:block">我的歌单</h1>
         <div className="flex flex-wrap items-center gap-2">
+          {/* 排序选项 */}
+          <div className="flex items-center gap-1 rounded-full border border-border px-2 py-1 text-sm">
+            <span className="px-2 text-muted-foreground">排序:</span>
+            <button
+              onClick={() => { setSortField('name'); setSortAsc(true) }}
+              className={`px-2 py-1 rounded transition hover:bg-muted ${sortField === 'name' && sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+            >
+              名称↑
+            </button>
+            <button
+              onClick={() => { setSortField('name'); setSortAsc(false) }}
+              className={`px-2 py-1 rounded transition hover:bg-muted ${sortField === 'name' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+            >
+              名称↓
+            </button>
+            <button
+              onClick={() => { setSortField('songCount'); setSortAsc(false) }}
+              className={`px-2 py-1 rounded transition hover:bg-muted ${sortField === 'songCount' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+            >
+              歌曲数↓
+            </button>
+            <button
+              onClick={() => { setSortField('createdAt'); setSortAsc(false) }}
+              className={`px-2 py-1 rounded transition hover:bg-muted ${sortField === 'createdAt' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+            >
+              最新创建↓
+            </button>
+          </div>
           {/* 批量删除按钮 */}
           {selectedIds.size > 0 && (
             <button
@@ -484,19 +570,29 @@ export function PlaylistsPage() {
             </button>
           )}
           {/* 第 14 项：下载全部未下载歌曲（默认最高质量，已存在的跳过） */}
-          {selectMode ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                已选 {selectedIds.size} 个歌单
-              </span>
-              <button
-                onClick={handleDownloadSelected}
-                disabled={queue.running || selectedIds.size === 0}
-                className="flex items-center gap-1 rounded-full bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-              >
-                <CloudDownload className="h-4 w-4" />
-                下载选中
-              </button>
+          <button
+            onClick={handleDownloadMissing}
+            disabled={queue.running}
+            className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted disabled:opacity-60"
+            title="扫描全部歌单，把尚未保存到 NAS 的歌曲逐一落盘"
+          >
+            <CloudDownload className="h-4 w-4" />
+            {queue.running
+              ? `下载中 ${queue.doneCount}/${queue.tasks.length}`
+              : '下载全部未下载歌曲'}
+          </button>
+
+          {/* 歌单选择模式切换按钮 */}
+          {selectedIds.size === 0 && !selectMode ? (
+            <button
+              onClick={() => setSelectMode(true)}
+              className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted"
+            >
+              <CheckCheck className="h-4 w-4" /> 选择歌单
+            </button>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {/* 取消选择按钮 */}
               <button
                 onClick={() => {
                   setSelectMode(false)
@@ -504,19 +600,36 @@ export function PlaylistsPage() {
                 }}
                 className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted"
               >
-                <CheckCheck className="h-4 w-4" /> 取消
+                <CheckCheck className="h-4 w-4" /> 取消选择
               </button>
+              {/* 批量操作按钮 */}
+              {selectedIds.size > 0 && (
+                <div className="flex gap-2">
+                  {/* 删除按钮 */}
+                  <button
+                    onClick={handleBatchDelete}
+                    disabled={batchDeleting || selectedIds.size === 0}
+                    className="flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-2 text-sm font-medium text-destructive transition hover:bg-destructive/25 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {batchDeleting
+                      ? `删除中 ${selectedIds.size}/${playlists.length}`
+                      : `删除 (${selectedIds.size})`}
+                  </button>
+                  {/* 合并按钮（需选中 ≥2 个） */}
+                  {selectedIds.size >= 2 && (
+                    <button
+                      onClick={() => setShowMerge(true)}
+                      disabled={merging}
+                      className="flex items-center gap-1 rounded-full bg-primary/15 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/25 disabled:opacity-50"
+                    >
+                      <Merge className="h-4 w-4" />
+                      {merging ? '合并中…' : `合并 (${selectedIds.size})`}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-          ) : (
-            <button
-              onClick={() => setSelectMode(true)}
-              disabled={queue.running}
-              className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted disabled:opacity-60"
-              title="选择歌单后下载，或取消后全量下载"
-            >
-              <CloudDownload className="h-4 w-4" />
-              下载全部未下载歌曲
-            </button>
           )}
           <button
             onClick={handleExport}
@@ -556,7 +669,7 @@ export function PlaylistsPage() {
         <LoadingSkeleton count={4} />
       ) : playlists.length > 0 ? (
         <PlaylistGrid
-          playlists={playlists}
+          playlists={sortedPlaylists}
           currentUsername={currentUsername}
           onEdit={setEditingPlaylist}
           onDelete={setDeletingPlaylist}

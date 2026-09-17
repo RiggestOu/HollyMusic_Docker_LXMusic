@@ -29,6 +29,7 @@ import { markDownloaded } from '@/lib/download-status'
  *   · 文件名由后端按 MusicInfo 组装（buildFilenameFromMusicInfo），不接受前端传入的文件名。
  *   · 目标目录默认 `/app/prisma/prisma/data/music`，可用环境变量 `MUSIC_DOWNLOAD_DIR` 覆盖。
  *   · 先写临时文件（.part），成功后重命名，避免中断留下半截文件。
+ *   · **有超时保护**：DOWNLOAD_TIMEOUT_MS 环境变量控制，默认 120 秒。
  *
  * 鉴权：受 requireUser 保护，未登录返回 401。
  */
@@ -36,6 +37,9 @@ import { markDownloaded } from '@/lib/download-status'
 /** 服务端落盘目录（默认即用户指定的 NAS 音乐目录）。 */
 const MUSIC_DIR =
   process.env.MUSIC_DOWNLOAD_DIR || '/app/prisma/prisma/data/music'
+
+/** 下载超时时间（毫秒），默认 120 秒，可通过 DOWNLOAD_TIMEOUT_MS 环境变量调整 */
+const DOWNLOAD_TIMEOUT_MS = parseInt(process.env.DOWNLOAD_TIMEOUT_MS || '120000', 10)
 
 const VALID_QUALITIES: QualityType[] = ['128k', '320k', 'flac', 'flac24bit']
 
@@ -84,14 +88,28 @@ export async function POST(request: NextRequest) {
     // 记录下载开始
     logger.info(`[download-to-nas] 开始下载 uid=${uid} quality=${quality}`)
 
-    // 3. 不传 Range → audioServe 返回 200 完整文件
-    const audioResp = await audioServe.serve({
-      cacheKey,
-      upstreamUrlResolver,
-      rangeHeader: null,
-      isHead: false,
-      intervalSec: parseIntervalToSeconds(musicInfo.interval),
-    })
+    // 3. 不传 Range → audioServe 返回 200 完整文件（带超时保护）
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS)
+
+    let audioResp
+    try {
+      audioResp = await audioServe.serve({
+        cacheKey,
+        upstreamUrlResolver,
+        rangeHeader: null,
+        isHead: false,
+        intervalSec: parseIntervalToSeconds(musicInfo.interval),
+      })
+    } catch (e) {
+      if (controller.signal.aborted) {
+        logger.warn(`[download-to-nas] 下载超时 uid=${uid} quality=${quality} timeout=${DOWNLOAD_TIMEOUT_MS}ms`)
+        return NextResponse.json({ error: `下载超时（>${DOWNLOAD_TIMEOUT_MS / 1000}s）` }, { status: 504 })
+      }
+      throw e
+    } finally {
+      clearTimeout(timeoutId)
+    }
 
     if (!audioResp.ok || !audioResp.body) {
       logger.warn(`[download-to-nas] audioServe 返回 ${audioResp.status} uid=${uid} quality=${quality}`)

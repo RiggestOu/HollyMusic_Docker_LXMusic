@@ -55,8 +55,10 @@ async function reportDownloadLog(
 export function useDownloadQueue() {
   const [tasks, setTasks] = useState<DownloadTask[]>([])
   const [running, setRunning] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [doneCount, setDoneCount] = useState(0)
   const cancelRef = useRef(false)
+  const pauseRef = useRef(false)
 
   const patch = useCallback((uid: string, next: Partial<DownloadTask>) => {
     setTasks(prev => prev.map(t => (t.uid === uid ? { ...t, ...next } : t)))
@@ -138,12 +140,25 @@ export function useDownloadQueue() {
 
   const run = useCallback(async () => {
     setRunning(true)
+    setPaused(false)
     cancelRef.current = false
+    pauseRef.current = false
     let ok = 0
     let failed = 0
 
     for (let i = 0; i < tasks.length; i++) {
       if (cancelRef.current) break
+      if (pauseRef.current) {
+        // 等待暂停解除
+        await new Promise<void>(resolve => {
+          const check = setInterval(() => {
+            if (!pauseRef.current) {
+              clearInterval(check)
+              resolve()
+            }
+          }, 100)
+        })
+      }
       const task = tasks[i]
       patch(task.uid, { status: 'downloading' })
 
@@ -179,6 +194,7 @@ export function useDownloadQueue() {
     }
 
     setRunning(false)
+    setPaused(false)
     const cancelled = cancelRef.current
     if (cancelled) {
       toast.error(`已取消：成功 ${ok} 首，失败 ${failed} 首`)
@@ -194,12 +210,25 @@ export function useDownloadQueue() {
 
   const cancel = useCallback(() => {
     cancelRef.current = true
+    pauseRef.current = false
+  }, [])
+
+  const pause = useCallback(() => {
+    pauseRef.current = true
+    setPaused(true)
+  }, [])
+
+  const resume = useCallback(() => {
+    pauseRef.current = false
+    setPaused(false)
   }, [])
 
   const clear = useCallback(() => {
     setTasks([])
     setDoneCount(0)
+    setPaused(false)
+    pauseRef.current = false
   }, [])
 
-  return { tasks, running, doneCount, enqueue, run, cancel, clear, resolveLocal }
+  return { tasks, running, paused, doneCount, enqueue, run, cancel, pause, resume, clear, resolveLocal }
 }

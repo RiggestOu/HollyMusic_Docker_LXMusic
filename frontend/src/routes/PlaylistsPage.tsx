@@ -14,6 +14,9 @@ import {
   Loader2,
   XCircle,
   CheckCircle2,
+  PauseCircle,
+  PlayCircle,
+  ChevronDown,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, type PlaylistSummary, type ImportPlaylistSong, type ImportResult } from '@/lib/api/playlists'
@@ -61,8 +64,19 @@ export function PlaylistsPage() {
 
   // 歌单排序方式
   type PlaylistSort = 'name' | 'songCount' | 'createdAt'
-  const [sortField, setSortField] = useState<PlaylistSort>('createdAt')
-  const [sortAsc, setSortAsc] = useState(false)
+  const [sortField, setSortField] = useState<PlaylistSort>('songCount')
+  const [sortAsc, setSortAsc] = useState(false) // false=降序, true=升序
+
+  // 切换排序
+  const handleSort = (field: PlaylistSort) => {
+    if (sortField === field) {
+      setSortAsc(prev => !prev)
+    } else {
+      setSortField(field)
+      // 设置默认排序方向
+      setSortAsc(field === 'name' ? true : false)
+    }
+  }
 
   // 排序后的歌单列表
   const sortedPlaylists = [...playlists].sort((a, b) => {
@@ -236,6 +250,7 @@ export function PlaylistsPage() {
   const [batchDeleting, setBatchDeleting] = useState(false)
   // 下载队列状态
   const [downloading, setDownloading] = useState(false)
+  const [showQueue, setShowQueue] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
   const [merging, setMerging] = useState(false)
   // 选择模式开关
@@ -436,119 +451,6 @@ export function PlaylistsPage() {
   }, [])
 
   /**
-   * 自动合并同名歌单：
-   * 1. 按歌单名称分组
-   * 2. 对每个包含 ≥2 个歌单的同名分组，自动合并为一个新歌单
-   * 3. 歌曲信息相同时自动去重（使用 songId 去重）
-   * 4. 合并成功后删除所有原歌单
-   */
-  const handleAutoMerge = async () => {
-    if (playlists.length < 2 || merging) return
-    setMerging(true)
-    console.info('[自动合并] 开始扫描同名歌单')
-
-    try {
-      // 按名称分组
-      const nameGroups = new Map<string, PlaylistSummary[]>()
-      for (const pl of playlists) {
-        const key = pl.name.trim()
-        if (!key) continue
-        const group = nameGroups.get(key) || []
-        group.push(pl)
-        nameGroups.set(key, group)
-      }
-
-      // 筛选出需要合并的分组（≥2 个同名歌单）
-      const groupsToMerge = Array.from(nameGroups.entries())
-        .filter(([, group]) => group.length >= 2)
-        .sort((a, b) => b[1].length - a[1].length) // 按数量降序
-
-      if (groupsToMerge.length === 0) {
-        toast.info('没有需要自动合并的同名歌单')
-        return
-      }
-
-      console.info(`[自动合并] 找到 ${groupsToMerge.length} 组同名歌单`)
-
-      let totalMerged = 0
-      let totalCreated = 0
-      const errors: string[] = []
-
-      for (const [name, group] of groupsToMerge) {
-        try {
-          // 收集所有歌曲并去重
-          const allSongs = new Map<string, ImportPlaylistSong>()
-          const seen = new Set<string>()
-
-          for (const pl of group) {
-            try {
-              const detail = await getPlaylist(pl.id)
-              for (const e of detail.entries || []) {
-                if (!e.songId || seen.has(e.songId)) continue
-                seen.add(e.songId)
-                allSongs.set(e.songId, {
-                  songId: e.songId,
-                  musicInfo: e.musicInfo as ImportPlaylistSong['musicInfo'],
-                })
-              }
-            } catch (err) {
-              console.error(`[自动合并] 读取歌单「${pl.name}」失败:`, err)
-            }
-          }
-
-          if (allSongs.size === 0) continue
-
-          // 调用后端导入接口创建新歌单
-          const playlistsLib = await import('@/lib/api/playlists')
-          const result = await playlistsLib.importPlaylists([{
-            name,
-            comment: null,
-            isPublic: false,
-            songs: Array.from(allSongs.values()),
-          }])
-
-          if (result.failed.length > 0) {
-            console.error(`[自动合并] 创建歌单「${name}」失败:`, result.failed)
-            errors.push(`创建「${name}」失败`)
-            continue
-          }
-
-          // 删除所有原歌单
-          for (const pl of group) {
-            try {
-              await deletePlaylist(pl.id)
-            } catch (err) {
-              console.error(`[自动合并] 删除歌单「${pl.name}」失败:`, err)
-              errors.push(`删除「${pl.name}」失败`)
-            }
-          }
-
-          totalMerged += group.length
-          totalCreated += 1
-          console.info(`[自动合并] 「${name}」：合并 ${group.length} 个歌单 → 1 个，歌曲 ${allSongs.size} 首`)
-        } catch (err) {
-          console.error(`[自动合并] 处理同名组「${name}」失败:`, err)
-          errors.push(`合并「${name}」失败`)
-        }
-      }
-
-      await reload()
-      console.info(`[自动合并] 完成：合并 ${totalMerged} 个歌单 → 新建 ${totalCreated} 个`)
-
-      if (errors.length > 0) {
-        toast.warning(`自动合并完成，但有 ${errors.length} 个错误：${errors.slice(0, 3).join('、')}${errors.length > 3 ? '...' : ''}`)
-      } else {
-        toast.success(`自动合并完成：合并 ${totalMerged} 个同名歌单 → 新建 ${totalCreated} 个歌单`)
-      }
-    } catch (error) {
-      console.error('[自动合并] 失败:', error)
-      toast.error(error instanceof Error ? error.message : '自动合并失败')
-    } finally {
-      setMerging(false)
-    }
-  }
-
-  /**
    * 合并选中的歌单：
    * 1. 逐个读取歌单歌曲（songId + musicInfo），按 songId 去重
    * 2. 调用后端批量导入接口一次性创建新歌单
@@ -626,21 +528,13 @@ export function PlaylistsPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="flex h-screen overflow-hidden">
+      {/* 主内容区 */}
+      <div className="flex-1 overflow-y-auto p-6">
       {/* 标题和工具栏 */}
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold">我的歌单</h1>
         <div className="flex flex-wrap items-center gap-2">
-          {/* 自动合并同名歌单 */}
-          <button
-            onClick={handleAutoMerge}
-            disabled={merging || playlists.length < 2}
-            className="flex items-center gap-1 rounded-full bg-primary/15 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/25 disabled:opacity-50"
-          >
-            <Merge className="h-4 w-4" />
-            {merging ? '自动合并中…' : '自动合并'}
-          </button>
-
           {/* 合并歌单（需选中 ≥2 个） */}
           {selectedIds.size >= 2 && (
             <button
@@ -683,30 +577,27 @@ export function PlaylistsPage() {
             </button>
           ) : (
             <div className="flex flex-col gap-2">
-              {/* 取消选择按钮 */}
-              <button
-                onClick={() => {
-                  setSelectMode(false)
-                  setSelectedIds(new Set())
-                }}
-                className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted"
-              >
-                <CheckCheck className="h-4 w-4" /> 取消选择
-              </button>
+              {/* 全选 + 取消选择按钮 */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedIds(new Set(playlists.map(p => p.id)))}
+                  className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted"
+                >
+                  <CheckCheck className="h-4 w-4" /> 全选
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectMode(false)
+                    setSelectedIds(new Set())
+                  }}
+                  className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted"
+                >
+                  <CheckCheck className="h-4 w-4" /> 取消选择
+                </button>
+              </div>
               {/* 批量操作按钮 */}
               {selectedIds.size > 0 && (
                 <div className="flex gap-2">
-                  {/* 删除按钮 */}
-                  <button
-                    onClick={handleBatchDelete}
-                    disabled={batchDeleting || selectedIds.size === 0}
-                    className="flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-2 text-sm font-medium text-destructive transition hover:bg-destructive/25 disabled:opacity-50"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {batchDeleting
-                      ? `删除中 ${selectedIds.size}/${playlists.length}`
-                      : `删除 (${selectedIds.size})`}
-                  </button>
                   {/* 合并按钮（需选中 ≥2 个） */}
                   {selectedIds.size >= 2 && (
                     <button
@@ -746,6 +637,36 @@ export function PlaylistsPage() {
           >
             <Plus className="h-4 w-4" /> 新建
           </button>
+          {/* 下载队列统计和展开按钮 */}
+          {queue.tasks.length > 0 && (
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={() => setShowQueue(!showQueue)}
+                className={`flex items-center gap-1 rounded-full px-3 py-2 text-sm font-medium transition hover:bg-muted ${showQueue ? 'bg-primary/15 text-primary' : 'border border-border'}`}
+              >
+                <Download className="h-4 w-4" />
+                下载队列
+                {queue.running && (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                )}
+                <ChevronDown className={`h-3 w-3 transition-transform ${showQueue ? 'rotate-180' : ''}`} />
+              </button>
+              {/* 统计信息 */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>共 {queue.tasks.length} 首</span>
+                {queue.doneCount > 0 && (
+                  <span className="flex items-center gap-0.5 text-green-500">
+                    <CheckCircle2 className="h-3 w-3" /> {queue.doneCount} 已完成
+                  </span>
+                )}
+                {queue.tasks.some(t => t.status === 'failed') && (
+                  <span className="flex items-center gap-0.5 text-red-500">
+                    <XCircle className="h-3 w-3" /> {queue.tasks.filter(t => t.status === 'failed').length} 失败
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <input
           ref={fileInputRef}
@@ -760,38 +681,23 @@ export function PlaylistsPage() {
       <div className="mb-3 flex items-center gap-2">
         <span className="text-sm text-muted-foreground">排序:</span>
         <button
-          onClick={() => { setSortField('name'); setSortAsc(true) }}
-          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'name' && sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+          onClick={() => handleSort('name')}
+          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'name' ? 'bg-primary/15 text-primary' : ''}`}
         >
-          名称↑
+          {sortAsc ? '名称↑' : '名称↓'}
         </button>
         <button
-          onClick={() => { setSortField('name'); setSortAsc(false) }}
-          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'name' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+          onClick={() => handleSort('songCount')}
+          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'songCount' ? 'bg-primary/15 text-primary' : ''}`}
         >
-          名称↓
+          {sortAsc ? '歌曲数↑' : '歌曲数↓'}
         </button>
         <button
-          onClick={() => { setSortField('songCount'); setSortAsc(false) }}
-          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'songCount' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
+          onClick={() => handleSort('createdAt')}
+          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'createdAt' ? 'bg-primary/15 text-primary' : ''}`}
         >
-          歌曲数↓
+          {sortAsc ? '创建时间↑' : '创建时间↓'}
         </button>
-        <button
-          onClick={() => { setSortField('createdAt'); setSortAsc(false) }}
-          className={`px-3 py-1 rounded text-sm transition hover:bg-muted ${sortField === 'createdAt' && !sortAsc ? 'bg-primary/15 text-primary' : ''}`}
-        >
-          最新创建↓
-        </button>
-        {selectedIds.size > 0 && (
-          <button
-            onClick={handleBatchDelete}
-            disabled={batchDeleting}
-            className="ml-2 px-3 py-1 rounded text-sm bg-red-500/15 text-red-500 transition hover:bg-red-500/25 disabled:opacity-50"
-          >
-            {batchDeleting ? '删除中…' : `删除 (${selectedIds.size})`}
-          </button>
-        )}
       </div>
 
       {loading ? (
@@ -851,61 +757,101 @@ export function PlaylistsPage() {
         )}
       </section>
 
-      {/* 下载队列 —— 显示当前正在下载的队列 */}
+      {/* 下载队列 —— 右侧面板 */}
       {queue.tasks.length > 0 && (
-        <section className="mt-8">
-          <div className="mb-3 flex items-center justify-between">
+        <div className={`w-80 border-l border-border bg-background flex flex-col transition-all ${showQueue ? 'translate-x-0' : 'translate-x-full hidden'}`}>
+          <div className="p-4 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Download className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-lg font-semibold">下载队列</h2>
-              {queue.running && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  进行中 {queue.doneCount}/{queue.tasks.length}
-                </span>
+              <h2 className="text-sm font-semibold">下载队列</h2>
+            </div>
+            <button
+              onClick={() => setShowQueue(false)}
+              className="p-1 hover:bg-muted rounded"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* 统计信息 */}
+          <div className="p-4 border-b border-border">
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-muted-foreground">总数: {queue.tasks.length}</span>
+              <span className="text-green-500">已完成: {queue.doneCount}</span>
+              {queue.tasks.some(t => t.status === 'failed') && (
+                <span className="text-red-500">失败: {queue.tasks.filter(t => t.status === 'failed').length}</span>
               )}
             </div>
             {queue.running && (
-              <button
-                onClick={queue.cancel}
-                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
-              >
-                <XCircle className="h-3 w-3" />
-                取消
-              </button>
+              <div className="mt-2 text-xs text-muted-foreground">
+                {queue.doneCount}/{queue.tasks.length} 进行中
+              </div>
             )}
           </div>
 
-          <ul className="divide-y divide-border rounded-lg border border-border">
-            {queue.tasks.map(task => (
-              <li key={task.uid} className="flex items-center gap-3 px-3 py-2 text-sm">
-                {task.status === 'downloading' && (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
-                )}
-                {task.status === 'done' && (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
-                )}
-                {task.status === 'failed' && (
-                  <XCircle className="h-4 w-4 shrink-0 text-destructive" />
-                )}
-                {task.status === 'pending' && (
-                  <span className="h-4 w-4 shrink-0" />
-                )}
-                <span className="min-w-0 flex-1 truncate" title={task.name}>
-                  {task.name}
-                </span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {task.quality}
-                </span>
-                {task.status === 'failed' && task.reason && (
-                  <span className="shrink-0 text-xs text-destructive" title={task.reason}>
-                    失败
+          {/* 控制按钮 */}
+          {queue.running && (
+            <div className="p-4 border-b border-border flex gap-2">
+              {queue.paused ? (
+                <button
+                  onClick={queue.resume}
+                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-primary/15 text-primary rounded hover:bg-primary/25"
+                >
+                  <PlayCircle className="h-3 w-3" /> 继续
+                </button>
+              ) : (
+                <button
+                  onClick={queue.pause}
+                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-muted text-muted-foreground rounded hover:bg-accent"
+                >
+                  <PauseCircle className="h-3 w-3" /> 暂停
+                </button>
+              )}
+              <button
+                onClick={queue.cancel}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-destructive/15 text-destructive rounded hover:bg-destructive/25"
+              >
+                <XCircle className="h-3 w-3" /> 取消
+              </button>
+            </div>
+          )}
+
+          {/* 任务列表 */}
+          <div className="flex-1 overflow-y-auto">
+            <ul className="divide-y divide-border">
+              {queue.tasks.map(task => (
+                <li key={task.uid} className="px-4 py-2 text-sm flex items-center gap-2">
+                  {task.status === 'downloading' && (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                  )}
+                  {task.status === 'done' && (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                  )}
+                  {task.status === 'failed' && (
+                    <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+                  )}
+                  {task.status === 'pending' && (
+                    <span className="h-4 w-4 shrink-0" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate" title={task.name}>
+                    {task.name}
                   </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
+                  <span className="shrink-0 text-xs text-muted-foreground">{task.quality}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* 清空按钮 */}
+          <div className="p-4 border-t border-border">
+            <button
+              onClick={queue.clear}
+              className="w-full px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted rounded"
+            >
+              清空队列
+            </button>
+          </div>
+        </div>
       )}
 
       {showCreate && (
@@ -940,6 +886,104 @@ export function PlaylistsPage() {
           onClose={() => setShowMerge(false)}
           onMerge={handleMerge}
         />
+      )}
+    </div>
+      
+      {/* 下载队列右侧面板 */}
+      {queue.tasks.length > 0 && (
+        <div className={`w-80 border-l border-border bg-background flex flex-col transition-all ${showQueue ? 'translate-x-0' : 'translate-x-full hidden'}`}>
+          <div className="p-4 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Download className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">下载队列</h2>
+            </div>
+            <button
+              onClick={() => setShowQueue(false)}
+              className="p-1 hover:bg-muted rounded"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          </div>
+          
+          {/* 统计信息 */}
+          <div className="p-4 border-b border-border">
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-muted-foreground">总数: {queue.tasks.length}</span>
+              <span className="text-green-500">已完成: {queue.doneCount}</span>
+              {queue.tasks.some(t => t.status === 'failed') && (
+                <span className="text-red-500">失败: {queue.tasks.filter(t => t.status === 'failed').length}</span>
+              )}
+            </div>
+            {queue.running && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                {queue.doneCount}/{queue.tasks.length} 进行中
+              </div>
+            )}
+          </div>
+          
+          {/* 控制按钮 */}
+          {queue.running && (
+            <div className="p-4 border-b border-border flex gap-2">
+              {queue.paused ? (
+                <button
+                  onClick={queue.resume}
+                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-primary/15 text-primary rounded hover:bg-primary/25"
+                >
+                  <PlayCircle className="h-3 w-3" /> 继续
+                </button>
+              ) : (
+                <button
+                  onClick={queue.pause}
+                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-muted text-muted-foreground rounded hover:bg-accent"
+                >
+                  <PauseCircle className="h-3 w-3" /> 暂停
+                </button>
+              )}
+              <button
+                onClick={queue.cancel}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-destructive/15 text-destructive rounded hover:bg-destructive/25"
+              >
+                <XCircle className="h-3 w-3" /> 取消
+              </button>
+            </div>
+          )}
+          
+          {/* 任务列表 */}
+          <div className="flex-1 overflow-y-auto">
+            <ul className="divide-y divide-border">
+              {queue.tasks.map(task => (
+                <li key={task.uid} className="px-4 py-2 text-sm flex items-center gap-2">
+                  {task.status === 'downloading' && (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                  )}
+                  {task.status === 'done' && (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                  )}
+                  {task.status === 'failed' && (
+                    <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+                  )}
+                  {task.status === 'pending' && (
+                    <span className="h-4 w-4 shrink-0" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate" title={task.name}>
+                    {task.name}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{task.quality}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          
+          {/* 清空按钮 */}
+          <div className="p-4 border-t border-border">
+            <button
+              onClick={queue.clear}
+              className="w-full px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted rounded"
+            >
+              清空队列
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -71,67 +71,16 @@ jobs:
           Compress-Archive -Path $exe.FullName -DestinationPath "hollymusic-desktop-latest.zip" -Force
           Get-Item "hollymusic-desktop-latest.zip" | Select-Object Name, Length
 
-      # 固定滚动 tag（hollymusic-desktop-latest）复用同一 Release。
-      # 改用 GitHub API 直接上传 asset（带重试），避免 softprops/action-gh-release
-      # 上传大文件时 "other side closed" 且静默不报错的问题。
+      # 固定滚动 tag（hollymusic-desktop-latest）复用同一 Release：不递增版本号、不每 build 一个 tag，
+      # 满足"发布到 Release"的诉求，同时把 SourceTree 里的标签数压到最少（仅 1 个固定 tag）。
       - name: Publish installer to Release
-        shell: bash
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: hollymusic-desktop-latest
+          name: hollymusic-desktop-latest
+          make_latest: true
+          files: hollymusic-desktop-latest.zip
+          body: |
+            Windows 桌面客户端安装包（NSIS installer）。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          TAG="hollymusic-desktop-latest"
-          FILE="hollymusic-desktop-latest.zip"
-
-          # 获取 release ID（已存在则复用，否则创建）
-          RELEASE_ID=$(curl -s \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
-            | jq -r '.id // empty')
-
-          if [ -z "$RELEASE_ID" ]; then
-            RELEASE_ID=$(curl -s -X POST \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"make_latest\":\"true\",\"body\":\"Windows 桌面客户端安装包（NSIS installer）。\"}" \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases" \
-              | jq -r '.id')
-            echo "Created new release id=$RELEASE_ID"
-          fi
-
-          # 删除旧的同名 asset（如果有）
-          curl -s \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
-            | jq -r '.[] | select(.name == "'"$FILE"'") | .id' \
-            | while read -r ASSET_ID; do
-                echo "Deleting old asset id=$ASSET_ID"
-                curl -s -X DELETE \
-                  -H "Authorization: token $GITHUB_TOKEN" \
-                  "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$ASSET_ID"
-              done
-
-          # 上传新 asset（最多重试 3 次）
-          UPLOAD_URL="https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$FILE"
-          SUCCESS=false
-          for i in 1 2 3; do
-            echo "Uploading $FILE (attempt $i)..."
-            if curl -s -L \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              -X POST \
-              "$UPLOAD_URL" \
-              --data-binary "@$FILE" \
-              -o /dev/null -w "%{http_code}" | grep -q "^2"; then
-              echo "Upload succeeded."
-              SUCCESS=true
-              break
-            fi
-            echo "Upload failed, retrying in 10s..."
-            sleep 10
-          done
-
-          if [ "$SUCCESS" != "true" ]; then
-            echo "::error::Failed to upload $FILE after 3 attempts"
-            exit 1
-          fi

@@ -24,7 +24,7 @@
   ${EndIf}
   
   ; 检查并删除旧文件
-  IfFileExists "$R0\*" 0 +3
+  ${If} ${FileExists} "$R0\*"
     RMDir /r /REBOOTOK "$R0"
     Sleep 500
     CreateDirectory "$R0"
@@ -50,7 +50,7 @@
   ${EndIf}
   
   ; 删除整个安装目录
-  IfFileExists "$R0\*" 0 +2
+  ${If} ${FileExists} "$R0\*"
     RMDir /r /REBOOTOK "$R0"
   ${EndIf}
   DetailPrint "安装目录已清理，用户数据已保留。"

@@ -436,6 +436,119 @@ export function PlaylistsPage() {
   }, [])
 
   /**
+   * 自动合并同名歌单：
+   * 1. 按歌单名称分组
+   * 2. 对每个包含 ≥2 个歌单的同名分组，自动合并为一个新歌单
+   * 3. 歌曲信息相同时自动去重（使用 songId 去重）
+   * 4. 合并成功后删除所有原歌单
+   */
+  const handleAutoMerge = async () => {
+    if (playlists.length < 2 || merging) return
+    setMerging(true)
+    console.info('[自动合并] 开始扫描同名歌单')
+
+    try {
+      // 按名称分组
+      const nameGroups = new Map<string, PlaylistSummary[]>()
+      for (const pl of playlists) {
+        const key = pl.name.trim()
+        if (!key) continue
+        const group = nameGroups.get(key) || []
+        group.push(pl)
+        nameGroups.set(key, group)
+      }
+
+      // 筛选出需要合并的分组（≥2 个同名歌单）
+      const groupsToMerge = Array.from(nameGroups.entries())
+        .filter(([, group]) => group.length >= 2)
+        .sort((a, b) => b[1].length - a[1].length) // 按数量降序
+
+      if (groupsToMerge.length === 0) {
+        toast.info('没有需要自动合并的同名歌单')
+        return
+      }
+
+      console.info(`[自动合并] 找到 ${groupsToMerge.length} 组同名歌单`)
+
+      let totalMerged = 0
+      let totalCreated = 0
+      const errors: string[] = []
+
+      for (const [name, group] of groupsToMerge) {
+        try {
+          // 收集所有歌曲并去重
+          const allSongs = new Map<string, ImportPlaylistSong>()
+          const seen = new Set<string>()
+
+          for (const pl of group) {
+            try {
+              const detail = await getPlaylist(pl.id)
+              for (const e of detail.entries || []) {
+                if (!e.songId || seen.has(e.songId)) continue
+                seen.add(e.songId)
+                allSongs.set(e.songId, {
+                  songId: e.songId,
+                  musicInfo: e.musicInfo as ImportPlaylistSong['musicInfo'],
+                })
+              }
+            } catch (err) {
+              console.error(`[自动合并] 读取歌单「${pl.name}」失败:`, err)
+            }
+          }
+
+          if (allSongs.size === 0) continue
+
+          // 调用后端导入接口创建新歌单
+          const playlistsLib = await import('@/lib/api/playlists')
+          const result = await playlistsLib.importPlaylists([{
+            name,
+            comment: null,
+            isPublic: false,
+            songs: Array.from(allSongs.values()),
+          }])
+
+          if (result.failed.length > 0) {
+            console.error(`[自动合并] 创建歌单「${name}」失败:`, result.failed)
+            errors.push(`创建「${name}」失败`)
+            continue
+          }
+
+          // 删除所有原歌单
+          for (const pl of group) {
+            try {
+              await deletePlaylist(pl.id)
+            } catch (err) {
+              console.error(`[自动合并] 删除歌单「${pl.name}」失败:`, err)
+              errors.push(`删除「${pl.name}」失败`)
+            }
+          }
+
+          totalMerged += group.length
+          totalCreated += 1
+          console.info(`[自动合并] 「${name}」：合并 ${group.length} 个歌单 → 1 个，歌曲 ${allSongs.size} 首`)
+        } catch (err) {
+          console.error(`[自动合并] 处理同名组「${name}」失败:`, err)
+          errors.push(`合并「${name}」失败`)
+        }
+      }
+
+      await reload()
+      console.info(`[自动合并] 完成：合并 ${totalMerged} 个歌单 → 新建 ${totalCreated} 个`)
+
+      if (errors.length > 0) {
+        toast.warning(`自动合并完成，但有 ${errors.length} 个错误：${errors.slice(0, 3).join('、')}${errors.length > 3 ? '...' : ''}`)
+      } else {
+        toast.success(`自动合并完成：合并 ${totalMerged} 个同名歌单 → 新建 ${totalCreated} 个歌单`)
+      }
+    } catch (error) {
+      console.error('[自动合并] 失败:', error)
+      toast.error(error instanceof Error ? error.message : '自动合并失败')
+    } finally {
+      setMerging(false)
+    }
+  }
+
+  /**
    * 合并选中的歌单：
    * 1. 逐个读取歌单歌曲（songId + musicInfo），按 songId 去重
    * 2. 调用后端批量导入接口一次性创建新歌单
@@ -518,29 +631,16 @@ export function PlaylistsPage() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold">我的歌单</h1>
         <div className="flex flex-wrap items-center gap-2">
-          {/* 自动整合歌单 - 常显按钮 */}
+          {/* 自动合并同名歌单 */}
           <button
-            onClick={() => setShowMerge(true)}
-            disabled={merging}
+            onClick={handleAutoMerge}
+            disabled={merging || playlists.length < 2}
             className="flex items-center gap-1 rounded-full bg-primary/15 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/25 disabled:opacity-50"
           >
             <Merge className="h-4 w-4" />
-            {merging ? '整合中…' : '自动整合歌单'}
+            {merging ? '自动合并中…' : '自动合并'}
           </button>
 
-          {/* 批量删除按钮 */}
-          {selectedIds.size > 0 && (
-            <button
-              onClick={handleBatchDelete}
-              disabled={batchDeleting}
-              className="flex items-center gap-1 rounded-full bg-destructive/15 px-3 py-2 text-sm font-medium text-destructive transition hover:bg-destructive/25 disabled:opacity-50"
-            >
-              <Trash2 className="h-4 w-4" />
-              {batchDeleting
-                ? `删除中 ${selectedIds.size}/${playlists.length}`
-                : `删除 (${selectedIds.size})`}
-            </button>
-          )}
           {/* 合并歌单（需选中 ≥2 个） */}
           {selectedIds.size >= 2 && (
             <button
@@ -683,6 +783,15 @@ export function PlaylistsPage() {
         >
           最新创建↓
         </button>
+        {selectedIds.size > 0 && (
+          <button
+            onClick={handleBatchDelete}
+            disabled={batchDeleting}
+            className="ml-2 px-3 py-1 rounded text-sm bg-red-500/15 text-red-500 transition hover:bg-red-500/25 disabled:opacity-50"
+          >
+            {batchDeleting ? '删除中…' : `删除 (${selectedIds.size})`}
+          </button>
+        )}
       </div>
 
       {loading ? (

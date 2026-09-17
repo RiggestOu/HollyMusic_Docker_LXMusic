@@ -215,7 +215,7 @@ export function PlaylistGrid({
                   e.preventDefault()
                   onToggleSelect?.(playlist.id)
                 }}
-                className={`absolute bottom-2 left-2 z-10 h-5 w-5 rounded border-2 flex items-center justify-center transition ${
+                className={`absolute bottom-2 right-2 z-10 h-5 w-5 rounded border-2 flex items-center justify-center transition ${
                   isSelected
                     ? 'bg-primary border-primary text-primary-foreground'
                     : 'border-muted-foreground/40 bg-background/80 hover:border-primary'

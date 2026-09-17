@@ -71,16 +71,51 @@ jobs:
           Compress-Archive -Path $exe.FullName -DestinationPath "hollymusic-desktop-latest.zip" -Force
           Get-Item "hollymusic-desktop-latest.zip" | Select-Object Name, Length
 
-      # 固定滚动 tag（hollymusic-desktop-latest）复用同一 Release：不递增版本号、不每 build 一个 tag，
-      # 满足"发布到 Release"的诉求，同时把 SourceTree 里的标签数压到最少（仅 1 个固定 tag）。
+      # 固定滚动 tag（hollymusic-desktop-latest）复用同一 Release。
+      # 改用 GitHub API 直接上传 asset（带重试），避免 softprops/action-gh-release
+      # 上传大文件时 "other side closed" 且静默不报错的问题。
       - name: Publish installer to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: hollymusic-desktop-latest
-          name: hollymusic-desktop-latest
-          make_latest: true
-          files: hollymusic-desktop-latest.zip
-          body: |
-            Windows 桌面客户端安装包（NSIS installer）。
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $TAG = "hollymusic-desktop-latest"
+          $FILE = "hollymusic-desktop-latest.zip"
+          $URI = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$TAG"
+
+          # 获取或创建 release
+          $resp = Invoke-RestMethod -Uri $URI -Method Get -Headers @{ Authorization = "token $GITHUB_TOKEN" } -ErrorAction SilentlyContinue
+          if ($resp) {
+            $RELEASE_ID = $resp.id
+            Write-Host "Found existing release id=$RELEASE_ID"
+          } else {
+            $body = @{ tag_name = $TAG; name = $TAG; make_latest = $true; body = "Windows desktop client installer (NSIS)." } | ConvertTo-Json
+            $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases" -Method Post -Headers @{ Authorization = "token $GITHUB_TOKEN"; "Content-Type" = "application/json" } -Body $body
+            $RELEASE_ID = $resp.id
+            Write-Host "Created new release id=$RELEASE_ID"
+          }
+
+          # 删除旧 asset
+          $assets = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" -Headers @{ Authorization = "token $GITHUB_TOKEN" }
+          foreach ($a in $assets) {
+            if ($a.name -eq $FILE) {
+              Write-Host "Deleting old asset: $($a.name) (id=$($a.id))"
+              Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($a.id)" -Method Delete -Headers @{ Authorization = "token $GITHUB_TOKEN" } | Out-Null
+            }
+          }
+
+          # 上传 asset（带重试）
+          $UPLOAD_URL = "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$FILE"
+          3.times { |i|
+            Write-Host "Uploading $FILE (attempt $i+1)..."
+            try {
+              Invoke-RestMethod -Uri $UPLOAD_URL -Method Post -Headers @{ Authorization = "token $GITHUB_TOKEN"; "Content-Type" = "application/octet-stream" } -InFile $FILE | Out-Null
+              Write-Host "Upload succeeded: $FILE"
+              return
+            } catch {
+              Write-Host "Upload failed: $_, retrying in 10s..."
+              Start-Sleep 10
+            }
+          }
+          Write-Error "Failed to upload $FILE after 3 attempts"
+          exit 1

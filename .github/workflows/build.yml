@@ -39,8 +39,11 @@ jobs:
       # ---------- 先打包源码（避免后续构建镜像时目录变化导致 tar 报错） ----------
       - name: Package source code
         run: |
+          # 先 tar 再 zip，避免 tar 看到 zip 文件导致 "file changed as we read it" 错误
+          tar czf hollymusic-source-latest.tar.gz --ignore-failed-read \
+            --exclude='.git' --exclude='target' --exclude='node_modules' \
+            --exclude='*.dockerignore' --exclude='*.md' --exclude='*.gz' .
           zip -r hollymusic-source-latest.zip . -x "*.git/*" "*.target/*" "node_modules/*" "*.dockerignore" "*.md" "*.gz"
-          tar czf hollymusic-source-latest.tar.gz --exclude='.git' --exclude='target' --exclude='node_modules' --exclude='*.dockerignore' --exclude='*.md' --exclude='*.gz' .
           ls -lh hollymusic-source-latest.*
 
       # ---------- 本地构建镜像 + 打离线 tar.gz + 推送 GHCR ----------
@@ -63,25 +66,65 @@ jobs:
           docker push "$IMG:${{ github.sha }}"
           docker push "$IMG:build-${{ github.run_number }}"
 
-      # ---------- 发布到 GitHub Release ----------
+      # ---------- 发布到 GitHub Release (curl API + 重试，避免 softprops 静默失败) ----------
       - name: Publish to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: hollymusic-docker-latest
-          name: hollymusic-docker-latest
-          make_latest: true
-          files: |
-            hollymusic_docker_lxmusic-latest.tar.gz
-            hollymusic-source-latest.zip
-            hollymusic-source-latest.tar.gz
-          body: |
-            ## Docker 镜像离线包
-            导入：gzip -d hollymusic_docker_lxmusic-latest.tar.gz | docker load
-
-            ## 源码包（ZIP 格式）
-            包含完整源码（不含 node_modules、target、.git 目录）。
-
-            ## 源码包（TAR.GZ 格式）
-            同上，tar.gz 压缩格式。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="hollymusic-docker-latest"
+          FILES="hollymusic_docker_lxmusic-latest.tar.gz hollymusic-source-latest.zip hollymusic-source-latest.tar.gz"
+
+          # 获取或创建 release
+          RELEASE_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+            | jq -r '.id // empty')
+
+          if [ -z "$RELEASE_ID" ]; then
+            RELEASE_ID=$(curl -s -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"make_latest\":\"true\",\"body\":\"Docker image + source packages. Import: gzip -d hollymusic_docker_lxmusic-latest.tar.gz | docker load\"}" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases" \
+              | jq -r '.id')
+            echo "Created new release id=$RELEASE_ID"
+          fi
+
+          # 删除旧 assets
+          for OLD_NAME in hollymusic_docker_lxmusic-latest.tar.gz hollymusic-source-latest.zip hollymusic-source-latest.tar.gz; do
+            OLD_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+              | jq -r ".[] | select(.name==\"$OLD_NAME\") | .id" | head -1)
+            if [ -n "$OLD_ID" ]; then
+              echo "Deleting old asset: $OLD_NAME (id=$OLD_ID)"
+              curl -s -X DELETE -H "Authorization: token $GITHUB_TOKEN" \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$OLD_ID"
+            fi
+          done
+
+          # 上传每个 asset（带重试）
+          for FILE in $FILES; do
+            UPLOAD_URL="https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$FILE"
+            SUCCESS=false
+            for i in 1 2 3; do
+              echo "Uploading $FILE (attempt $i)..."
+              HTTP_CODE=$(curl -s -L \
+                -H "Authorization: token $GITHUB_TOKEN" \
+                -H "Content-Type: application/octet-stream" \
+                -X POST \
+                "$UPLOAD_URL" \
+                --data-binary "@$FILE" \
+                -o /dev/null -w "%{http_code}")
+              if echo "$HTTP_CODE" | grep -q "^2"; then
+                echo "Upload succeeded: $FILE"
+                SUCCESS=true
+                break
+              fi
+              echo "Upload failed (HTTP $HTTP_CODE), retrying in 10s..."
+              sleep 10
+            done
+            if [ "$SUCCESS" != "true" ]; then
+              echo "::error::Failed to upload $FILE after 3 attempts"
+              exit 1
+            fi
+          done

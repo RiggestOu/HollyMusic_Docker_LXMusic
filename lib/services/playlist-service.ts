@@ -375,7 +375,6 @@ export async function deduplicatePlaylists(username: string): Promise<{
         for (const entry of detail.entries) {
           if (entry.songId) allSongIds.add(entry.songId)
         }
-        deletedPlaylists += await deletePlaylist(id, username)
       }
     }
 
@@ -383,6 +382,12 @@ export async function deduplicatePlaylists(username: string): Promise<{
     if (allSongIds.size > 0) {
       await addSongsToPlaylist(mainId, username, Array.from(allSongIds))
       mergedPlaylists++
+    }
+
+    // 删除重复歌单
+    const idsToDelete = ids.slice(1)
+    if (idsToDelete.length > 0) {
+      deletedPlaylists += await deletePlaylistsBatch(idsToDelete, username)
     }
   }
 

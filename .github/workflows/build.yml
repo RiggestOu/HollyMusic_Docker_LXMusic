@@ -36,6 +36,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ---------- 先打包源码（避免后续构建镜像时目录变化导致 tar 报错） ----------
+      - name: Package source code
+        run: |
+          zip -r hollymusic-source-latest.zip . -x "*.git/*" "*.target/*" "node_modules/*" "*.dockerignore" "*.md" "*.gz"
+          tar czf hollymusic-source-latest.tar.gz --exclude='.git' --exclude='target' --exclude='node_modules' --exclude='*.dockerignore' --exclude='*.md' --exclude='*.gz' .
+          ls -lh hollymusic-source-latest.*
+
       # ---------- 本地构建镜像 + 打离线 tar.gz + 推送 GHCR ----------
       - name: Build image (local) and package tar.gz
         env:
@@ -55,13 +62,6 @@ jobs:
           docker push "$IMG:latest"
           docker push "$IMG:${{ github.sha }}"
           docker push "$IMG:build-${{ github.run_number }}"
-
-      # ---------- 打包源码为 zip 和 tar.gz（不含 node_modules、target、.git 等） ----------
-      - name: Package source code
-        run: |
-          zip -r hollymusic-source-latest.zip . -x "*.git/*" "*.target/*" "node_modules/*" "*.dockerignore" "*.md"
-          tar czf hollymusic-source-latest.tar.gz --exclude='.git' --exclude='target' --exclude='node_modules' --exclude='*.dockerignore' --exclude='*.md' .
-          ls -lh hollymusic-source-latest.*
 
       # ---------- 发布到 GitHub Release ----------
       - name: Publish to Release

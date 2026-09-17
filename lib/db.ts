@@ -82,15 +82,13 @@ export async function getMusicInfosByUids(uids: string[]): Promise<Map<string, M
 
     if (pairs.length === 0) return result
 
-    // 批量查询
-    const placeholders = pairs.map(() => '(?, ?)').join(', ')
-    const params = pairs.flatMap(p => [p.source, p.songmid])
-
+    // 批量查询（使用 OR 条件）
     const rows = await prisma.musicInfo.findMany({
       where: {
-        source_songmid: {
-          in: pairs.map(p => ({ source: p.source, songmid: p.songmid })),
-        },
+        OR: pairs.map(p => ({
+          source: p.source,
+          songmid: p.songmid,
+        })),
       },
     })
 

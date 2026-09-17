@@ -9,16 +9,6 @@
 ;   · 卸载时：删除整个安装目录
 ;   · 用户数据目录 %APPDATA%\HollyMusic Desktop\config.json **永远不删除**
 
-; 获取安装目录路径（perMachine 模式默认 Program Files）
-!macro GetInstallDir OUTPUT_VAR
-  ; 优先读取注册表（如果用户自定义了安装路径）
-  ReadRegStr $99 HKLM "SOFTWARE\HollyMusic Desktop" "InstallDir"
-  ${If} $99 == ""
-    StrCpy $99 "$PROGRAMFILES64\HollyMusic Desktop"
-  ${EndIf}
-  StrCpy $${OUTPUT_VAR} $99
-!macroend
-
 !macro NSIS_HOOK_PREINSTALL
   DetailPrint "正在关闭正在运行的 HollyMusic Desktop ..."
   ; /T 连同子进程一起结束；进程不存在时 nsExec 静默返回，不弹任何错误
@@ -27,13 +17,17 @@
   Sleep 800
 
   DetailPrint "正在清理旧版本程序文件 ..."
-  GetInstallDir INSTALL_DIR
-  IfFileExists "$INSTALL_DIR\*" 0 +3
-    ; 删除所有文件和子目录（保留目录本身以便后续写入）
-    RMDir /r /REBOOTOK "$INSTALL_DIR"
+  ; 获取安装目录：优先读注册表，回退到默认 Program Files
+  ReadRegStr $R0 HKLM "SOFTWARE\HollyMusic Desktop" "InstallDir"
+  ${If} $R0 == ""
+    StrCpy $R0 "$PROGRAMFILES64\HollyMusic Desktop"
+  ${EndIf}
+  
+  ; 检查并删除旧文件
+  IfFileExists "$R0\*" 0 +3
+    RMDir /r /REBOOTOK "$R0"
     Sleep 500
-    ; 重新创建空目录
-    CreateDirectory "$INSTALL_DIR"
+    CreateDirectory "$R0"
   ${EndIf}
   DetailPrint "旧版本程序文件已清理。"
 !macroend
@@ -49,9 +43,15 @@
   Sleep 800
 
   DetailPrint "正在清理安装目录 ..."
-  GetInstallDir INSTALL_DIR
-  IfFileExists "$INSTALL_DIR\*" 0 +2
-    RMDir /r /REBOOTOK "$INSTALL_DIR"
+  ; 获取安装目录：优先读注册表，回退到默认 Program Files
+  ReadRegStr $R0 HKLM "SOFTWARE\HollyMusic Desktop" "InstallDir"
+  ${If} $R0 == ""
+    StrCpy $R0 "$PROGRAMFILES64\HollyMusic Desktop"
+  ${EndIf}
+  
+  ; 删除整个安装目录
+  IfFileExists "$R0\*" 0 +2
+    RMDir /r /REBOOTOK "$R0"
   ${EndIf}
   DetailPrint "安装目录已清理，用户数据已保留。"
 !macroend

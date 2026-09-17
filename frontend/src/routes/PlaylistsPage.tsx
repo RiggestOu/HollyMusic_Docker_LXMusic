@@ -16,7 +16,7 @@ import {
   CheckCircle2,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, deduplicatePlaylists, type PlaylistSummary, type ImportPlaylistSong } from '@/lib/api/playlists'
+import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, type PlaylistSummary, type ImportPlaylistSong } from '@/lib/api/playlists'
 import type { MusicInfo } from '@/lib/types/music'
 import { useAuthStore } from '@/hooks/useAuth'
 import { usePlaylists } from '@/hooks/usePlaylists'
@@ -234,7 +234,8 @@ export function PlaylistsPage() {
   // 批量选中状态
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [batchDeleting, setBatchDeleting] = useState(false)
-  const [deduplicating, setDeduplicating] = useState(false)
+  // 下载队列状态
+  const [downloading, setDownloading] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
   const [merging, setMerging] = useState(false)
   // 选择模式开关
@@ -412,22 +413,6 @@ export function PlaylistsPage() {
       toast.error(error instanceof Error ? error.message : '删除失败')
     } finally {
       setBatchDeleting(false)
-    }
-  }
-
-  // 自动去重
-  const handleDeduplicate = async () => {
-    try {
-      setDeduplicating(true)
-      const result = await deduplicatePlaylists()
-      toast.success(
-        `去重完成：合并 ${result.mergedPlaylists} 个歌单，删除 ${result.deletedPlaylists} 个重复歌单，清除 ${result.removedDuplicates} 首重复歌曲`
-      )
-      await reload()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '去重失败')
-    } finally {
-      setDeduplicating(false)
     }
   }
 

@@ -28,7 +28,10 @@ export function PlaylistDetailPage() {
 
   const tracks: Track[] = (detail?.entries ?? [])
     .filter(e => e.musicInfo)
-    .map(e => toTrack({ uid: e.songId, musicInfo: e.musicInfo! }))
+    .map(e => {
+      const mi = e.musicInfo!
+      return toTrack({ uid: `${mi.source}-${mi.songmid}`, musicInfo: mi })
+    })
 
   useEffect(() => {
     const closeMenu = (event: MouseEvent) => {

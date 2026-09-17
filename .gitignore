@@ -116,3 +116,12 @@ test-results/
 playwright-report/
 vitest.config.ts.timestamp-*
 checkelist.md
+
+# ---------- 临时/调试脚本 ----------
+scripts/debug-weapi.js
+scripts/lx-debug
+scripts/test-*.js
+scripts/verify-particle-shaders.py
+
+# ---------- TypeScript 构建缓存 ----------
+tsconfig.tsbuildinfo

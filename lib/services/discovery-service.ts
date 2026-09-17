@@ -482,24 +482,48 @@ type WyPlaylistTrack = Parameters<typeof toWyMusicInfo>[0]
 
 async function getWyTracksByIds(ids: number[]): Promise<WyPlaylistTrack[]> {
   const uniqueIds = [...new Set(ids.filter(Number.isFinite))]
-  const songs: WyPlaylistTrack[] = []
-  for (let start = 0; start < uniqueIds.length; start += WY_SONG_DETAIL_BATCH_SIZE) {
-    const batch = uniqueIds.slice(start, start + WY_SONG_DETAIL_BATCH_SIZE)
-    const payload = await fetchJson<{ code?: number; songs?: WyPlaylistTrack[] }>('https://music.163.com/weapi/v3/song/detail', {
-      method: 'POST',
-      headers: {
-        Origin: 'https://music.163.com',
-        Referer: 'https://music.163.com/',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: createWyWeapiParams({
-        c: `[${batch.map(songId => `{"id":${songId}}`).join(',')}]`,
-        ids: `[${batch.join(',')}]`,
-      }),
-    })
-    if (payload.code !== 200 || !Array.isArray(payload.songs)) throw new Error('网易云音乐未返回歌曲详情')
-    songs.push(...payload.songs)
+  if (uniqueIds.length === 0) return []
+  
+  // 分批并行请求，提升速度：每批 1000 首，同时最多 3 批
+  const batchSize = WY_SONG_DETAIL_BATCH_SIZE
+  const batches: number[][] = []
+  for (let i = 0; i < uniqueIds.length; i += batchSize) {
+    batches.push(uniqueIds.slice(i, i + batchSize))
   }
+  
+  // 并行请求所有批次
+  const results = await Promise.allSettled(batches.map(async batch => {
+    try {
+      const payload = await fetchJson<{ code?: number; songs?: WyPlaylistTrack[] }>('https://music.163.com/weapi/v3/song/detail', {
+        method: 'POST',
+        headers: {
+          Origin: 'https://music.163.com',
+          Referer: 'https://music.163.com/',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: createWyWeapiParams({
+          c: JSON.stringify(batch.map(songId => ({ id: songId }))),
+          ids: JSON.stringify(batch),
+        }),
+      })
+      if (payload.code !== 200 || !Array.isArray(payload.songs)) {
+        logger.warn('[discovery] getWyTracksByIds batch failed: code=' + payload.code)
+        return [] as WyPlaylistTrack[]
+      }
+      return payload.songs
+    } catch (e) {
+      logger.warn('[discovery] getWyTracksByIds batch error:', e)
+      return [] as WyPlaylistTrack[]
+    }
+  }))
+  
+  const songs: WyPlaylistTrack[] = []
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      songs.push(...result.value)
+    }
+  }
+  
   const order = new Map(uniqueIds.map((songId, index) => [songId, index]))
   return songs.sort((a, b) => (order.get(Number(a.id)) ?? Number.MAX_SAFE_INTEGER) - (order.get(Number(b.id)) ?? Number.MAX_SAFE_INTEGER))
 }

@@ -11,6 +11,9 @@ import {
   Trash2,
   CheckCheck,
   Merge,
+  Loader2,
+  XCircle,
+  CheckCircle2,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { getPlaylist, addSongsToPlaylist, updatePlaylist, deletePlaylist, type PlaylistSummary, type ImportPlaylistSong } from '@/lib/api/playlists'
@@ -32,6 +35,7 @@ interface ExportedPlaylistData {
   name: string
   comment: string | null
   isPublic: boolean
+  coverArt?: string | null
   songs: { songId: string; musicInfo: unknown }[]
 }
 interface PlaylistExportFile {
@@ -106,7 +110,10 @@ export function PlaylistsPage() {
           for (const s of songs) {
             if (!s?.songId || seen.has(s.songId)) continue
             seen.add(s.songId)
-            all.push({ uid: s.songId, name: s.musicInfo?.name, types: s.musicInfo?.types })
+            const mi = s.musicInfo as { source?: string; songmid?: string; name?: string; types?: unknown } | null
+            const uid = mi?.source && mi?.songmid ? `${mi.source}-${mi.songmid}` : undefined
+            if (!uid) continue
+            all.push({ uid, name: mi?.name, types: mi?.types })
           }
         } catch {
           // 单个歌单读取失败不阻断整体
@@ -134,8 +141,11 @@ export function PlaylistsPage() {
       const detail = await getPlaylist(playlist.id)
       const songs = Array.isArray(detail?.entries) ? detail.entries : []
       const items = songs
-        .filter(t => !!t?.songId)
-        .map(t => ({ uid: t.songId, name: t.musicInfo?.name, types: t.musicInfo?.types }))
+        .filter(t => !!t?.songId && t.musicInfo?.source && t.musicInfo?.songmid)
+        .map(t => {
+          const mi = t.musicInfo as { source: string; songmid: string; name?: string; types?: unknown }
+          return { uid: `${mi.source}-${mi.songmid}`, name: mi.name, types: mi.types }
+        })
       const n = await queue.enqueue(items, true)
       if (n === 0) {
         toast.info('该歌单的歌曲本地已存在，无需下载')
@@ -145,6 +155,43 @@ export function PlaylistsPage() {
       await reloadLocal()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '下载失败')
+    }
+  }
+
+  /** 下载选中歌单的未下载歌曲 */
+  const handleDownloadSelected = async () => {
+    if (queue.running || selectedIds.size === 0) return
+    try {
+      const all: Array<{ uid: string; name?: string; types?: unknown }> = []
+      const seen = new Set<string>()
+      for (const p of playlists.filter(pl => selectedIds.has(pl.id))) {
+        try {
+          const detail = await getPlaylist(p.id)
+          const songs = Array.isArray(detail?.entries) ? detail.entries : []
+          for (const s of songs) {
+            if (!s?.songId || seen.has(s.songId)) continue
+            seen.add(s.songId)
+            const mi = s.musicInfo as { source?: string; songmid?: string; name?: string; types?: unknown } | null
+            const uid = mi?.source && mi?.songmid ? `${mi.source}-${mi.songmid}` : undefined
+            if (!uid) continue
+            all.push({ uid, name: mi?.name, types: mi?.types })
+          }
+        } catch {
+          // 单个歌单读取失败不阻断整体
+        }
+      }
+      const n = await queue.enqueue(all, true)
+      if (n === 0) {
+        toast.info('选中歌单本地已存在全部歌曲，无需下载')
+        return
+      }
+      await queue.run()
+      await reloadLocal()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '下载失败')
+    } finally {
+      setSelectMode(false)
+      setSelectedIds(new Set())
     }
   }
 
@@ -170,6 +217,8 @@ export function PlaylistsPage() {
   const [batchDeleting, setBatchDeleting] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
   const [merging, setMerging] = useState(false)
+  // 选择模式开关
+  const [selectMode, setSelectMode] = useState(false)
 
   const handleExport = async () => {
     try {
@@ -181,10 +230,13 @@ export function PlaylistsPage() {
       }
       for (const pl of playlists) {
         const detail = await getPlaylist(pl.id)
+        // 使用第一首歌的封面作为歌单封面
+        const coverArt = detail.entries?.[0]?.musicInfo?.img || pl.coverArt || null
         data.playlists.push({
           name: pl.name,
           comment: pl.comment,
           isPublic: pl.isPublic,
+          coverArt,
           songs: detail.entries.map(e => ({ songId: e.songId, musicInfo: e.musicInfo })),
         })
       }
@@ -432,17 +484,40 @@ export function PlaylistsPage() {
             </button>
           )}
           {/* 第 14 项：下载全部未下载歌曲（默认最高质量，已存在的跳过） */}
-          <button
-            onClick={handleDownloadMissing}
-            disabled={queue.running}
-            className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted disabled:opacity-60"
-            title="扫描全部歌单，把尚未保存到 NAS 的歌曲逐一落盘"
-          >
-            <CloudDownload className="h-4 w-4" />
-            {queue.running
-              ? `下载中 ${queue.doneCount}/${queue.tasks.length}`
-              : '下载全部未下载歌曲'}
-          </button>
+          {selectMode ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                已选 {selectedIds.size} 个歌单
+              </span>
+              <button
+                onClick={handleDownloadSelected}
+                disabled={queue.running || selectedIds.size === 0}
+                className="flex items-center gap-1 rounded-full bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+              >
+                <CloudDownload className="h-4 w-4" />
+                下载选中
+              </button>
+              <button
+                onClick={() => {
+                  setSelectMode(false)
+                  setSelectedIds(new Set())
+                }}
+                className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted"
+              >
+                <CheckCheck className="h-4 w-4" /> 取消
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setSelectMode(true)}
+              disabled={queue.running}
+              className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted disabled:opacity-60"
+              title="选择歌单后下载，或取消后全量下载"
+            >
+              <CloudDownload className="h-4 w-4" />
+              下载全部未下载歌曲
+            </button>
+          )}
           <button
             onClick={handleExport}
             className="flex items-center gap-1 rounded-full border border-border px-3 py-2 text-sm font-medium transition hover:bg-muted"
@@ -486,7 +561,7 @@ export function PlaylistsPage() {
           onEdit={setEditingPlaylist}
           onDelete={setDeletingPlaylist}
           onDownload={handleDownloadPlaylist}
-          multiSelect
+          multiSelect={selectMode || selectedIds.size > 0}
           selectedIds={selectedIds}
           onToggleSelect={handleToggleSelect}
           onSelectAll={handleSetSelected}
@@ -533,6 +608,63 @@ export function PlaylistsPage() {
           </ul>
         )}
       </section>
+
+      {/* 下载队列 —— 显示当前正在下载的队列 */}
+      {queue.tasks.length > 0 && (
+        <section className="mt-8">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Download className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-lg font-semibold">下载队列</h2>
+              {queue.running && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  进行中 {queue.doneCount}/{queue.tasks.length}
+                </span>
+              )}
+            </div>
+            {queue.running && (
+              <button
+                onClick={queue.cancel}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              >
+                <XCircle className="h-3 w-3" />
+                取消
+              </button>
+            )}
+          </div>
+
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {queue.tasks.map(task => (
+              <li key={task.uid} className="flex items-center gap-3 px-3 py-2 text-sm">
+                {task.status === 'downloading' && (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                )}
+                {task.status === 'done' && (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                )}
+                {task.status === 'failed' && (
+                  <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+                )}
+                {task.status === 'pending' && (
+                  <span className="h-4 w-4 shrink-0" />
+                )}
+                <span className="min-w-0 flex-1 truncate" title={task.name}>
+                  {task.name}
+                </span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {task.quality}
+                </span>
+                {task.status === 'failed' && task.reason && (
+                  <span className="shrink-0 text-xs text-destructive" title={task.reason}>
+                    失败
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {showCreate && (
         <CreatePlaylistDialog

@@ -209,18 +209,19 @@ export async function createPlaylist(username: string, name: string): Promise<Pl
 }
 
 /**
- * 更新歌单元数据（name/comment/isPublic）。仅 owner。
+ * 更新歌单元数据（name/comment/isPublic/coverArt）。仅 owner。
  */
 export async function updatePlaylistMeta(
   id: number,
   username: string,
-  updates: { name?: string; comment?: string; isPublic?: boolean }
+  updates: { name?: string; comment?: string; isPublic?: boolean; coverArt?: string | null }
 ): Promise<void> {
   await assertOwner(id, username)
   const data: Prisma.PlaylistUpdateInput = {}
   if (updates.name !== undefined) data.name = updates.name
   if (updates.comment !== undefined) data.comment = updates.comment
   if (updates.isPublic !== undefined) data.isPublic = updates.isPublic
+  if (updates.coverArt !== undefined) data.coverArt = updates.coverArt
   if (Object.keys(data).length > 0) {
     await prisma.playlist.update({ where: { id }, data })
   }

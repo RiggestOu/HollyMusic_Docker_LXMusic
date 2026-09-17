@@ -39,10 +39,13 @@ export async function GET(request: NextRequest) {
     }
 
     // 只读查询 MusicInfo，不写数据库
+    logger.info("\[local-music/resolve] 查询 uid=" + uid)
     const musicInfo = await resolveMusicInfoById(uid)
     if (!musicInfo) {
+      logger.warn("\[local-music/resolve] 未找到 MusicInfo: " + uid)
       return NextResponse.json({ local: false, reason: 'no-music-info' }, { status: 404 })
     }
+    logger.info("\[local-music/resolve] 查询 uid=" + uid)
 
     for (const quality of QUALITIES) {
       const name = sanitizeFilename(buildFilenameFromMusicInfo(musicInfo, quality))

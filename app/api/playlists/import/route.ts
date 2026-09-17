@@ -20,6 +20,7 @@ interface ImportPlaylist {
   name: string
   comment?: string | null
   isPublic?: boolean
+  coverArt?: string | null
   songs: ImportSong[]
 }
 
@@ -27,9 +28,20 @@ interface ImportBody {
   playlists: ImportPlaylist[]
 }
 
+// 最大导入时间（毫秒）：超时则返回部分结果
+const MAX_IMPORT_MS = 5 * 60 * 1000 // 5 分钟
+const BATCH_SIZE = 200 // 每批处理 songId 数量
+
 export async function POST(
   request: NextRequest
 ) {
+  const startTime = Date.now()
+  const timeoutCheck = async () => {
+    if (Date.now() - startTime > MAX_IMPORT_MS) {
+      throw new Error(`导入超时（>${MAX_IMPORT_MS / 1000}s），已处理部分数据`)
+    }
+  }
+
   try {
     const user = await requireUser(request)
     const body = await request.json().catch(() => ({})) as ImportBody
@@ -48,6 +60,7 @@ export async function POST(
     let index = 0
 
     for (const item of body.playlists) {
+      await timeoutCheck()
       index++
       const name = (item.name || '').trim() || '导入的歌单'
       const songCount = Array.isArray(item.songs) ? item.songs.length : 0
@@ -58,32 +71,43 @@ export async function POST(
         const playlist = await createPlaylist(user.username, name)
         logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」创建成功，id=${playlist.id}`)
 
-        // 2. 更新元数据
-        const updates: { comment?: string; public?: boolean } = {}
+        // 2. 更新元数据（含封面）
+        const updates: { comment?: string; public?: boolean; coverArt?: string | null } = {}
         if (item.comment !== undefined) updates.comment = item.comment ?? undefined
         if (item.isPublic !== undefined) updates.public = item.isPublic
+        if (item.coverArt) updates.coverArt = item.coverArt
         if (Object.keys(updates).length > 0) {
           await updatePlaylistMeta(playlist.id, user.username, updates)
           logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」元数据已更新，fields=${Object.keys(updates).join(',')}`)
         }
 
-        // 3. Up sert 所有 musicInfo（批量事务）
+        // 3. Upsert 所有 musicInfo（分批处理，每批 200 条）
         const musicInfos = item.songs
           .filter(s => s.musicInfo)
           .map(s => s.musicInfo!)
 
         if (musicInfos.length > 0) {
-          await upsertMusicInfosInTransaction(musicInfos)
+          for (let i = 0; i < musicInfos.length; i += BATCH_SIZE) {
+            await timeoutCheck()
+            const batch = musicInfos.slice(i, i + BATCH_SIZE)
+            await upsertMusicInfosInTransaction(batch)
+            logger.info(`[import] (${index}/${totalPlaylists}) musicInfo upsert ${i + 1}-${Math.min(i + BATCH_SIZE, musicInfos.length)}/${musicInfos.length}`)
+          }
           logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」musicInfo 批量 upsert 完成，条数=${musicInfos.length}`)
         }
 
-        // 4. 添加歌曲到歌单
+        // 4. 添加歌曲到歌单（分批处理，每批 200 条）
         const songIds = item.songs
           .filter(s => s.songId)
           .map(s => s.songId!)
 
         if (songIds.length > 0) {
-          await addSongsToPlaylist(playlist.id, user.username, songIds)
+          for (let i = 0; i < songIds.length; i += BATCH_SIZE) {
+            await timeoutCheck()
+            const batch = songIds.slice(i, i + BATCH_SIZE)
+            await addSongsToPlaylist(playlist.id, user.username, batch)
+            logger.info(`[import] (${index}/${totalPlaylists}) 添加歌曲 ${i + 1}-${Math.min(i + BATCH_SIZE, songIds.length)}/${songIds.length}`)
+          }
           logger.info(`[import] (${index}/${totalPlaylists}) 歌单「${name}」添加歌曲完成，条数=${songIds.length}`)
         }
 
@@ -95,10 +119,11 @@ export async function POST(
       }
     }
 
-    logger.info(`[import] ===== 导入结束：user=${user.username}，成功=${created.length}，失败=${failed.length} =====` +
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+    logger.info(`[import] ===== 导入结束：user=${user.username}，成功=${created.length}，失败=${failed.length}，耗时 ${elapsed}s =====` +
       (failed.length > 0 ? ` 失败歌单：${failed.map(f => f.name).join('、')}` : ''))
 
-    return createSuccessResponse({ created, failed, totalCreated: created.length })
+    return createSuccessResponse({ created, failed, totalCreated: created.length, elapsedSec: Number(elapsed) })
   } catch (err) {
     if (err instanceof AuthError) {
       return createErrorResponse('UNAUTHORIZED', err.message, 401)

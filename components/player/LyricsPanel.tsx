@@ -262,6 +262,7 @@ export function LyricsPanel({ audio }: LyricsPanelProps) {
           overflow-hidden：右侧列表抽屉收起时平移出界，不能撑出横向滚动 */}
       <div className="relative min-h-0 flex-1 overflow-hidden bg-[#08080C]">
         <ParticleScene
+          key={track?.uid}
           audio={audio}
           isPlaying={isPlaying}
           preset={preset}

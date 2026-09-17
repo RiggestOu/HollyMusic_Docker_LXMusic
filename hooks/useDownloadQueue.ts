@@ -77,7 +77,10 @@ export function useDownloadQueue() {
       }
       const data = (await res.json().catch(() => ({}))) as { local?: boolean; reason?: string }
       console.debug('[resolveLocal] uid=', uid, 'data=', JSON.stringify(data))
-      return data.local === true
+      // 关键：只有 local === true 才认为是已下载
+      const isLocal = data.local === true
+      console.info('[resolveLocal] uid=', uid, 'isLocal=', isLocal, 'data=', JSON.stringify(data))
+      return isLocal
     } catch (e) {
       console.error('[resolveLocal] error uid=', uid, e)
       return false
@@ -97,13 +100,16 @@ export function useDownloadQueue() {
       console.log('[enqueue] items.length=', items.length, 'skipExisting=', skipExisting)
       const list: DownloadTask[] = []
       let skipped = 0
+      let checked = 0
       for (const it of items) {
         if (!it?.uid) {
           console.warn('[enqueue] invalid item:', it)
           continue
         }
+        checked++
         if (skipExisting) {
           const isLocal = await resolveLocal(it.uid)
+          console.log('[enqueue] checked uid=', it.uid, 'isLocal=', isLocal, 'checked=', checked)
           if (isLocal) {
             skipped++
             continue

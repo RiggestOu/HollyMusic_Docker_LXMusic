@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { logger } from '@/lib/logger'
 
 const LENS_DIR = join(process.cwd(), 'prisma_data', 'LensPresets')
 const CURRENT_FILE = join(LENS_DIR, 'current_preset.json')

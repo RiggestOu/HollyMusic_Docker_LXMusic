@@ -50,11 +50,12 @@ function getClientIP(request: NextRequest): string {
  * 返回：{ ok: true, filename, size, path } 或 { error: string }
  */
 export async function POST(request: NextRequest) {
+  let uid: string | undefined
   try {
     await requireUser(request)
 
     const body = (await request.json()) as { uid?: string; quality?: string }
-    const uid = body?.uid
+    uid = body?.uid
     if (!uid || typeof uid !== 'string') {
       return NextResponse.json({ error: '缺少或无效的 uid 参数' }, { status: 400 })
     }
